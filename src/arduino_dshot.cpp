@@ -1,7 +1,7 @@
 #include "Arduino.h"
 #include "Dshot.h"
-#include "C2.h"
-
+#include "arduino_dshot.hpp"
+#include <util/atomic.h>
 /**
  * Update frequencies from 2kHz onwards tend to cause issues in regards
  * to processing the DShot response and will result in actual 3kHz instead.
@@ -24,11 +24,7 @@
  */
 const FREQUENCY frequency = F500;
 
-// Set inverted to true if you want bi-directional DShot
-#define inverted true
-
-// Enable Extended Dshot Telemetry
-bool enableEdt = true;
+// Always inverted (bidir dshot)
 
 // DSHOT Output pin
 const uint8_t pinDshot = 8;
@@ -50,32 +46,11 @@ const uint8_t pinDshot = 8;
  */
 #define debug true
 
-// If this pin is pulled low, then the device starts in C2 interface mode
-#define C2_ENABLE_PIN 13
-
-/*
-// When using Port B, make sure to remap the C2_ENABLE_PIN to a different port
-// Port definitions for Port B
-#define C2_PORT PORTB
-#define C2_DDR DDRB
-#define C2_PIN PINB
-
-// Pin 0-7 for the given port
-#define C2D_PIN  4 // D12
-#define C2CK_PIN 3 // D11
-*/
-
-// Port definitions for Port D
-#define C2_PORT PORTD
-#define C2_DDR DDRD
-#define C2_PIN PIND
-
-/* Pin 0-7 for the given port */
-#define C2D_PIN  2 // D2
-#define C2CK_PIN 3 // D3
+#define MIN_THR 48u
+#define NUM_VALUES_PER_DIR 1000u //reverse commands are this much above fwd commands
 
 /* Initialization */
-uint32_t dshotResponse = 0;
+uint32_t DSHOT_RESPONSE = 0;
 uint32_t dshotResponseLast = 0;
 uint16_t mappedLast = 0;
 
@@ -87,11 +62,9 @@ uint16_t counter[buffSize];
 uint16_t receivedPackets = 0;
 uint16_t successPackets = 0;
 
-bool newResponse = false;
+bool FRAME_COMPLETE = false;
 bool hasEsc = false;
 
-bool c2Mode = false;
-C2 *c2;
 
 // Duration LUT - considerably faster than division
 const uint8_t duration[] = {
@@ -122,30 +95,21 @@ const uint8_t duration[] = {
   4, // 22
 };
 
-Dshot dshot = new Dshot(inverted);
+Dshot dshot = new Dshot(true);
 volatile uint16_t frame = dshot.buildFrame(0, 0);
-
-volatile uint8_t edtTemperature = 0;
-volatile uint8_t edtVoltage = 0;
-volatile uint8_t edtCurrent = 0;
-volatile uint8_t edtDebug1 = 0;
-volatile uint8_t edtDebug2 = 0;
-volatile uint8_t edtDebug3 = 0;
-volatile uint8_t edtState = 0;
 
 uint32_t lastPeriodTime = 0;
 
 #define DELAY_CYCLES(n) __builtin_avr_delay_cycles(n)
 
 void sendDshot300Frame();
-void sendDshot300Bit(uint8_t bit);
 void sendInvertedDshot300Bit(uint8_t bit);
-void processTelemetryResponse();
-void readUpdate();
+void readTelemetryResponse();
 void printResponse();
 
-void processTelemetryResponse() {
+void readTelemetryResponse() {
   // Set to Input in order to process the response - this will be at 3.3V level
+  //I suppose we need to wait long enough anyway so why not use the slow Arduino version
   pinMode(pinDshot, INPUT_PULLUP);
 
   // Delay around 26us
@@ -191,7 +155,7 @@ void processTelemetryResponse() {
   pinMode(pinDshot, OUTPUT);
 
   // Set all 21 possible bits to one and flip the once that should be zero
-  dshotResponse = 0x001FFFFF;
+  DSHOT_RESPONSE = 0x001FFFFF;
   unsigned long bitValue = 0x00;
   uint8_t bitCount = 0;
   for(uint8_t i = 1; i < buffSize; i += 1) {
@@ -203,12 +167,12 @@ void processTelemetryResponse() {
     bitValue ^= 0x01; // Toggle bit value - always start with 0
     counter[i] = duration[counter[i]];
     for(uint8_t j = 0; j < counter[i]; j += 1) {
-      dshotResponse ^= (bitValue << (20 - bitCount++));
+      DSHOT_RESPONSE ^= (bitValue << (20 - bitCount++));
     }
   }
 
   // Decode GCR 21 -> 20 bit (since the 21st bit is definetly a 0)
-  dshotResponse ^= (dshotResponse >> 1);
+  DSHOT_RESPONSE ^= (DSHOT_RESPONSE >> 1);
 }
 
 /**
@@ -226,11 +190,7 @@ void sendDshot300Frame() {
   uint16_t temp = frame;
   uint8_t offset = 0;
   do {
-    #if inverted
-      sendInvertedDshot300Bit((temp & 0x8000) >> 15);
-    #else
-      sendDshot300Bit((temp & 0x8000) >> 15);
-    #endif
+    sendInvertedDshot300Bit((temp & 0x8000) >> 15);
     temp <<= 1;
   } while(++offset < 0x10);
 }
@@ -260,24 +220,6 @@ void sendInvertedDshot300Bit(uint8_t bit) {
     //DELAY_CYCLES(20);
     DELAY_CYCLES(16);
     PORTB = B00000001;
-    //DELAY_CYCLES(33);
-    DELAY_CYCLES(25);
-  }
-}
-
-void sendDshot300Bit(uint8_t bit) {
-  if(bit) {
-    PORTB = B00000001;
-    //DELAY_CYCLES(40);
-    DELAY_CYCLES(37);
-    PORTB = B00000000;
-    //DELAY_CYCLES(13);
-    DELAY_CYCLES(7);
-  } else {
-    PORTB = B00000001;
-    //DELAY_CYCLES(20);
-    DELAY_CYCLES(16);
-    PORTB = B00000000;
     //DELAY_CYCLES(33);
     DELAY_CYCLES(25);
   }
@@ -329,78 +271,56 @@ void setupTimer() {
 }
 
 ISR(TIMER2_COMPA_vect) {
-  sendDshot300Frame();
-
-  #if inverted
-    processTelemetryResponse();
-    newResponse = true;
-  #endif
+    sendDshot300Frame();
+    readTelemetryResponse();
+    FRAME_COMPLETE = true;
 }
 
 void dshotSetup() {
-  Serial.begin(115200);
-  while(!Serial);
-
   pinMode(pinDshot, OUTPUT);
 
   // Set the default signal Level
-  #if inverted
-    PORTB = B00000001;
-  #else
-    PORTB = B00000000;
-  #endif
-
-  #if debug
-    Serial.println("Input throttle value to be sent to ESC");
-    Serial.println("Valid throttle values are 47 - 2047");
-    Serial.println("Lines are only printed if the value changed");
-    Serial.print("Frames are sent repeatadly in the chosen update frequency: ");
-    Serial.print(frequency);
-    Serial.println("Hz");
-
-    if(enableEdt) {
-      Serial.println();
-      Serial.println("Send 13 to enable extended DShot telemetry");
-      Serial.println("CAUTION: EDT is disabled once disarmed (sending 0 after non 0 throttle value)");
-    }
-  #endif
+  PORTB = B00000001;
 
   setupTimer();
 }
 
-void readUpdate() {
-  // Serial read might not always trigger properly here since the timer might interrupt
-  // Disabling the interrupts is not an option since Serial uses interrupts too.
-  if(Serial.available() > 0) {
-    uint16_t dshotValue = Serial.parseInt(SKIP_NONE);
-    Serial.read();
-
-    if(dshotValue > 2047) {
-      dshotValue = 2047;
+void stopMotor()
+{
+    uint16_t tmp_frame = dshot.buildFrame(0, 0);
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE){
+        frame = tmp_frame;
     }
-    frame = dshot.buildFrame(dshotValue, 0);
-
-    if(dshotValue == 13) {
-      /**
-       * Lazy solution: Technically this command should be sent exactly six times
-       * to enable EDT. But sending it at least 6 times does not have any side
-       * effect, so we just send it until a proper throttle value is provided.
-       */
-      frame = dshot.buildFrame(13, 1);
-    }
-
-    Serial.print("> Frame: ");
-    Serial.print(frame, BIN);
-    Serial.print(" Value: ");
-    Serial.println(dshotValue);
-  }
 }
 
-void printResponse() {
-  if(newResponse) {
-    newResponse  = false;
+/* Has atomic protections. Input range of 0 to 999, will saturate */
+void requestThrottle(uint16_t throttle, bool is_fwd)
+{
+    if(throttle >= NUM_VALUES_PER_DIR) {
+      throttle = NUM_VALUES_PER_DIR-1;
+    }
+    throttle+=MIN_THR;
 
-    uint16_t mapped = dshot.mapTo16Bit(dshotResponse);
+    if(!is_fwd){
+      throttle+=NUM_VALUES_PER_DIR;
+    }
+    uint16_t tmp_frame = dshot.buildFrame(throttle, 0);
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE){
+        frame = tmp_frame;
+    }
+}
+
+void processTelemetryResponse() {
+  if(FRAME_COMPLETE) {
+    uint32_t dshotResponse_local;
+
+    FRAME_COMPLETE  = false;
+
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE){
+        dshotResponse_local = DSHOT_RESPONSE;
+    }
+
+    uint16_t mapped = dshot.mapTo16Bit(dshotResponse_local);
     uint8_t crc = mapped & 0x0F;
     uint16_t value = mapped >> 4;
     uint8_t crcExpected = dshot.calculateCrc(value);
@@ -430,46 +350,13 @@ void printResponse() {
       successPackets = 0;
     }
 
-    if((dshotResponse != dshotResponseLast) || !debug) {
-      dshotResponseLast = dshotResponse;
+    if((DSHOT_RESPONSE != dshotResponseLast) || !debug) {
+      dshotResponseLast = DSHOT_RESPONSE;
 
       // DShot Frame: EEEMMMMMMMMM
       uint32_t periodBase = value & 0b0000000111111111;
       uint8_t periodShift = value >> 9 & 0b00000111;
       uint32_t periodTime =  periodBase << periodShift;
-
-      uint8_t packageType = value >> 8 & 0b00001111;
-
-      if(enableEdt) {
-        /**
-         * Extended DShot Frame: PPPEMMMMMMMM
-         *
-         * In extended Dshot the first bit after after
-         * the exponent indicated if it is telemetry
-         *
-         * A 0 bit indicates telemetry, in this case
-         * the exponent maps to a certain type of telemetry.
-         *
-         * A telemetry package only happens every n packages
-         * and it does not include ERPM data, it is assumed
-         * that the previous ERPM value is still valid.
-         */
-        if((packageType & 0x01) == 0) {
-          switch(packageType) {
-            case 0x02: edtTemperature = periodBase; break;
-            case 0x04: edtVoltage = periodBase; break;
-            case 0x06: edtCurrent = periodBase; break;
-            case 0x08: edtDebug1 = periodBase; break;
-            case 0x0A: edtDebug2 = periodBase; break;
-            case 0x0C: edtDebug3 = periodBase; break;
-            case 0x0E: edtState = periodBase; break;
-          }
-
-          periodTime = lastPeriodTime;
-        } else {
-          lastPeriodTime = periodTime;
-        }
-      }
 
       if(crc == crcExpected) {
         Serial.print("OK: ");
@@ -486,32 +373,6 @@ void printResponse() {
         Serial.print("us ");
         Serial.print(round(successPercent));
         Serial.print("%");
-
-        if(enableEdt) {
-          Serial.print(" EDT: ");
-          Serial.print(edtTemperature);
-          Serial.print("°C");
-
-          Serial.print(" | ");
-          Serial.print(edtVoltage * 0.25);
-          Serial.print("V");
-
-          Serial.print(" | ");
-          Serial.print(edtCurrent);
-          Serial.print("A");
-
-          Serial.print(" | D1: ");
-          Serial.print(edtDebug1);
-
-          Serial.print(" | D2: ");
-          Serial.print(edtDebug2);
-
-          Serial.print(" | D3: ");
-          Serial.print(edtDebug3);
-
-          Serial.print(" | S: ");
-          Serial.print(edtState);
-        }
       #endif
       Serial.println();
     }
@@ -519,36 +380,5 @@ void printResponse() {
 }
 
 void dshotLoop() {
-  readUpdate();
   printResponse();
-}
-
-void c2Setup() {
-  c2 = new C2(&C2_PORT, &C2_DDR, &C2_PIN, (uint8_t) C2CK_PIN, (uint8_t) C2D_PIN, (uint8_t) LED_BUILTIN);
-  c2->setup();
-}
-
-void setup() {
-  pinMode(C2_ENABLE_PIN, INPUT_PULLUP);
-  c2Mode = !digitalRead(C2_ENABLE_PIN);
-
-  if(c2Mode) {
-    c2Setup();
-  } else {
-    dshotSetup();
-
-    /*
-    if(enableEdt) {
-      frame = dshot.buildFrame(13, 1);
-    }
-    */
-  }
-}
-
-void loop() {
-  if(c2Mode) {
-    c2->loop();
-  } else {
-    dshotLoop();
-  }
 }
