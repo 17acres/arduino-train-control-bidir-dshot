@@ -22,52 +22,31 @@
  * Even if response processing can be sped up, at the higher frequencies we would
  * still struggle to serial print the results.
  */
-const FREQUENCY frequency = F500;
+#define frequency F500
 
 // Always inverted (bidir dshot)
 
 // DSHOT Output pin
-const uint8_t pinDshot = 8;
+#define pinDshot 4 // PD4 is timer1 input capture. Writes to ALL bits of the port!
 
-/**
- * If debug mode is enabled, more information is printed to the serial console:
- * - Percentage of packages successfully received (CRC checksums match)
- * - Information on startup
- *
- * With debug disabled output will look like so:
- * --: 65408
- * OK: 65408
- *
- * With debug enabled output will look like so:
- * OK: 13696us 96.52%
- * --: 65408us 96.43%
- * OK: 13696us 96.43%
- * OK: 22400us 96.44%
- */
-#define debug true
+//Timer 1 for input capture of BDSHOT
+//Timer 3 for loop timing
+//Port D for interface
 
 #define MIN_THR 48u
 #define NUM_VALUES_PER_DIR 1000u //reverse commands are this much above fwd commands
 
-/* Initialization */
-uint32_t DSHOT_RESPONSE = 0;
-uint32_t dshotResponseLast = 0;
-uint16_t mappedLast = 0;
 
-// Buffer for counting duration between falling and rising edges
-const uint8_t buffSize = 20;
-uint16_t counter[buffSize];
+Dshot dshot = new Dshot(true);
 
-// Statistics for success rate
-uint16_t receivedPackets = 0;
-uint16_t successPackets = 0;
 
-bool FRAME_COMPLETE = false;
-bool hasEsc = false;
-
+/* ISR Variables */
+uint32_t v_DSHOT_RESPONSE = 0;
+bool v_FRAME_COMPLETE = false;
+volatile uint16_t v_FRAME = dshot.buildFrame(0, 0);
 
 // Duration LUT - considerably faster than division
-const uint8_t duration[] = {
+const uint8_t state_duration_to_bits_lut[] = {
   0,
   0,
   0,
@@ -95,19 +74,22 @@ const uint8_t duration[] = {
   4, // 22
 };
 
-Dshot dshot = new Dshot(true);
-volatile uint16_t frame = dshot.buildFrame(0, 0);
 
-uint32_t lastPeriodTime = 0;
+
 
 #define DELAY_CYCLES(n) __builtin_avr_delay_cycles(n)
 
 void sendDshot300Frame();
 void sendInvertedDshot300Bit(uint8_t bit);
 void readTelemetryResponse();
-void printResponse();
 
+//CALLED FROM ISR
 void readTelemetryResponse() {
+  // Buffer for counting duration between falling and rising edges
+  // Do the calculation of DSHOT_RESPONSE here so it is easier to read atomically
+  #define buffSize 20
+  uint16_t counter[buffSize];
+  
   // Set to Input in order to process the response - this will be at 3.3V level
   //I suppose we need to wait long enough anyway so why not use the slow Arduino version
   pinMode(pinDshot, INPUT_PULLUP);
@@ -154,8 +136,9 @@ void readTelemetryResponse() {
 
   pinMode(pinDshot, OUTPUT);
 
+  uint16_t temp_dshot_response;
   // Set all 21 possible bits to one and flip the once that should be zero
-  DSHOT_RESPONSE = 0x001FFFFF;
+  temp_dshot_response = 0x001FFFFF;
   unsigned long bitValue = 0x00;
   uint8_t bitCount = 0;
   for(uint8_t i = 1; i < buffSize; i += 1) {
@@ -165,17 +148,20 @@ void readTelemetryResponse() {
     }
 
     bitValue ^= 0x01; // Toggle bit value - always start with 0
-    counter[i] = duration[counter[i]];
+    counter[i] = state_duration_to_bits_lut[counter[i]];
     for(uint8_t j = 0; j < counter[i]; j += 1) {
-      DSHOT_RESPONSE ^= (bitValue << (20 - bitCount++));
+      temp_dshot_response ^= (bitValue << (20 - bitCount++));
     }
   }
 
   // Decode GCR 21 -> 20 bit (since the 21st bit is definetly a 0)
-  DSHOT_RESPONSE ^= (DSHOT_RESPONSE >> 1);
+  temp_dshot_response ^= (temp_dshot_response >> 1);
+
+  v_DSHOT_RESPONSE = temp_dshot_response;
 }
 
 /**
+ * CALLED FROM ISR
  * Frames are sent MSB first.
  *
  * Unfortunately we can't  rotate through carry on an ATMega.
@@ -187,7 +173,7 @@ void readTelemetryResponse() {
  *              transmission.
  */
 void sendDshot300Frame() {
-  uint16_t temp = frame;
+  uint16_t temp = v_FRAME;
   uint8_t offset = 0;
   do {
     sendInvertedDshot300Bit((temp & 0x8000) >> 15);
@@ -196,6 +182,7 @@ void sendDshot300Frame() {
 }
 
 /**
+ * CALLED FROM ISR
  * digitalWrite takes about 3.4us to execute, that's why we switch ports directly.
  * Switching ports directly will allow a transition in 0.19us or 190ns.
  *
@@ -209,17 +196,17 @@ void sendDshot300Frame() {
  */
 void sendInvertedDshot300Bit(uint8_t bit) {
   if(bit) {
-    PORTB = B00000000;
+    PORTD = 0;
     //DELAY_CYCLES(40);
     DELAY_CYCLES(37);
-    PORTB = B00000001;
+    PORTD = _BV(PD4);
     //DELAY_CYCLES(13);
     DELAY_CYCLES(7);
   } else {
-    PORTB = B00000000;
+    PORTD = 0;
     //DELAY_CYCLES(20);
     DELAY_CYCLES(16);
-    PORTB = B00000001;
+    PORTD = _BV(PD4);
     //DELAY_CYCLES(33);
     DELAY_CYCLES(25);
   }
@@ -228,59 +215,49 @@ void sendInvertedDshot300Bit(uint8_t bit) {
 void setupTimer() {
   cli();
 
-  TCCR2A = 0;
-  TCCR2B = 0;
-  TCNT2 = 0;
+  TCNT3 = 0;
+  TCCR3B = 0b00000010; // Prescaler 8
 
   switch(frequency) {
     case F500: {
-      // 500 Hz (16000000/((124 + 1) * 256))
-      OCR2A = 124;
-      TCCR2B |= 0b00000110; // Prescaler 256
+      // 500 Hz (16000000/((3999 + 1) * 8))
+      OCR3A = 3999;
     } break;
 
     case F1k: {
-      // 1000 Hz (16000000/((124 + 1) * 128))
-      OCR2A = 124;
-      TCCR2B |= 0b00000101; // Prescaler 128
+      OCR3A = 1999;
     } break;
 
     case F2k: {
-      // 2000 Hz (16000000/((124 + 1) * 64))
-      OCR2A = 124;
-      TCCR2B |= 0b00000100; // Prescaler 64
+      OCR3A = 999;
     } break;
 
     case F4k: {
-      // 4000 Hz (16000000/( (124 + 1) * 32))
-      OCR2A = 124;
-      TCCR2B |= 0b00000011; // Prescaler 32
+      OCR3A = 499;
     } break;
 
     default: {
-      // 8000 Hz (16000000/( (249 + 1) * 8))
-      OCR2A = 249;
-      TCCR2B |= 0b00000010; // Prescaler 8
+      OCR3A = 249;
     } break;
   }
 
-  TCCR2A |= 0b00001010; // CTC mode - count to OCR2A
-  TIMSK2 = 0b00000010; // Enable INT on compare match A
+  TCCR3A = 0b00001010; // CTC mode - count to OCR3A
+  TIMSK3 = 0b00000010; // Enable INT on compare match A
 
   sei();
 }
 
-ISR(TIMER2_COMPA_vect) {
+ISR(TIMER3_COMPA_vect) {
     sendDshot300Frame();
     readTelemetryResponse();
-    FRAME_COMPLETE = true;
+    v_FRAME_COMPLETE = true;
 }
 
 void dshotSetup() {
   pinMode(pinDshot, OUTPUT);
 
   // Set the default signal Level
-  PORTB = B00000001;
+  PORTD = _BV(PD4);
 
   setupTimer();
 }
@@ -289,7 +266,7 @@ void stopMotor()
 {
     uint16_t tmp_frame = dshot.buildFrame(0, 0);
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE){
-        frame = tmp_frame;
+        v_FRAME = tmp_frame;
     }
 }
 
@@ -306,18 +283,22 @@ void requestThrottle(uint16_t throttle, bool is_fwd)
     }
     uint16_t tmp_frame = dshot.buildFrame(throttle, 0);
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE){
-        frame = tmp_frame;
+        v_FRAME = tmp_frame;
     }
 }
 
-void processTelemetryResponse() {
-  if(FRAME_COMPLETE) {
+bool processTelemetryResponse(uint16_t *commutation_period) {
+    // Statistics for success rate
+    static uint16_t ls_receivedPackets = 0;
+    static uint16_t ls_successPackets = 0;
+
     uint32_t dshotResponse_local;
 
-    FRAME_COMPLETE  = false;
+    v_FRAME_COMPLETE  = false;
+    ls_receivedPackets++;
 
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE){
-        dshotResponse_local = DSHOT_RESPONSE;
+        dshotResponse_local = v_DSHOT_RESPONSE;
     }
 
     uint16_t mapped = dshot.mapTo16Bit(dshotResponse_local);
@@ -326,59 +307,39 @@ void processTelemetryResponse() {
     uint8_t crcExpected = dshot.calculateCrc(value);
 
     //Serial.println(mapped, BIN);
-    Serial.print(value, BIN);
-    Serial.print(" ");
-    Serial.println(crc, BIN);
+    // Serial.print(value, BIN);
+    // Serial.print(" ");
+    // Serial.println(crc, BIN);
 
-    // Wait for a first valid response
-    if(!hasEsc) {
-      if(crc == crcExpected) {
-        hasEsc = true;
-      }
-
-      return;
+    if(crc != crcExpected){
+      return false;
     }
 
-    // Calculate success rate - percentage of packeges on which CRC matched the value
-    receivedPackets++;
-    if(crc == crcExpected) {
-      successPackets++;
-    }
+    ls_successPackets++;
 
     // Reset packet count if overflows
-    if(!receivedPackets) {
-      successPackets = 0;
+    if(!ls_receivedPackets) {
+      ls_successPackets = 0;
     }
 
-    if((DSHOT_RESPONSE != dshotResponseLast) || !debug) {
-      dshotResponseLast = DSHOT_RESPONSE;
+
 
       // DShot Frame: EEEMMMMMMMMM
       uint32_t periodBase = value & 0b0000000111111111;
       uint8_t periodShift = value >> 9 & 0b00000111;
       uint32_t periodTime =  periodBase << periodShift;
 
-      if(crc == crcExpected) {
-        Serial.print("OK: ");
-      } else {
-        Serial.print("--: ");
-      }
 
-      #if debug
-        float successPercent = (successPackets * 1.0 / receivedPackets * 1.0) * 100;
-      #endif
+    //   #if debug
+    //     float successPercent = (ls_successPackets * 1.0 / ls_receivedPackets * 1.0) * 100;
+    //   #endif
 
-      Serial.print(periodTime);
-      #if debug
-        Serial.print("us ");
-        Serial.print(round(successPercent));
-        Serial.print("%");
-      #endif
-      Serial.println();
-    }
+    //   Serial.print(periodTime);
+    //   #if debug
+    //     Serial.print("us ");
+    //     Serial.print(round(successPercent));
+    //     Serial.print("%");
+    //   #endif
+    //   Serial.println();
   }
-}
-
-void dshotLoop() {
-  printResponse();
 }
