@@ -2,6 +2,7 @@
 #include "Dshot.h"
 #include "arduino_dshot.hpp"
 #include <util/atomic.h>
+#include "common.hpp"
 /**
  * Update frequencies from 2kHz onwards tend to cause issues in regards
  * to processing the DShot response and will result in actual 3kHz instead.
@@ -27,7 +28,10 @@
 // Always inverted (bidir dshot)
 
 // DSHOT Output pin
-#define pinDshot 4 // PD4 is timer1 input capture. Writes to ALL bits of the port!
+#define pinDshot 4 // PD4 is timer1 input capture
+#define portPinDshot PD4
+#define pinIsrTimer 6 //PD7 is timer2 ISR-running-indicator
+#define portPinIsrTimer PD7
 
 //Timer 1 for input capture of BDSHOT
 //Timer 3 for loop timing
@@ -136,7 +140,7 @@ void readTelemetryResponse() {
 
   pinMode(pinDshot, OUTPUT);
 
-  uint16_t temp_dshot_response;
+  uint32_t temp_dshot_response;
   // Set all 21 possible bits to one and flip the once that should be zero
   temp_dshot_response = 0x001FFFFF;
   unsigned long bitValue = 0x00;
@@ -196,17 +200,17 @@ void sendDshot300Frame() {
  */
 void sendInvertedDshot300Bit(uint8_t bit) {
   if(bit) {
-    PORTD = 0;
+    CLR_BIT(PORTD,portPinDshot);
     //DELAY_CYCLES(40);
     DELAY_CYCLES(37);
-    PORTD = _BV(PD4);
+    SET_BIT(PORTD,portPinDshot);
     //DELAY_CYCLES(13);
     DELAY_CYCLES(7);
   } else {
-    PORTD = 0;
+    CLR_BIT(PORTD,portPinDshot);
     //DELAY_CYCLES(20);
     DELAY_CYCLES(16);
-    PORTD = _BV(PD4);
+    SET_BIT(PORTD,portPinDshot);
     //DELAY_CYCLES(33);
     DELAY_CYCLES(25);
   }
@@ -248,16 +252,20 @@ void setupTimer() {
 }
 
 ISR(TIMER3_COMPA_vect) {
+    SET_BIT(PORTD,portPinIsrTimer);
     sendDshot300Frame();
     readTelemetryResponse();
     v_FRAME_COMPLETE = true;
+    CLR_BIT(PORTD,portPinIsrTimer);
 }
 
 void dshotSetup() {
   pinMode(pinDshot, OUTPUT);
+  pinMode(pinIsrTimer, OUTPUT);
 
   // Set the default signal Level
-  PORTD = _BV(PD4);
+  SET_BIT(PORTD,portPinDshot);
+  CLR_BIT(PORTD,portPinIsrTimer);
 
   setupTimer();
 }
@@ -324,10 +332,12 @@ bool processTelemetryResponse(uint16_t *commutation_period) {
 
 
 
-      // DShot Frame: EEEMMMMMMMMM
-      uint32_t periodBase = value & 0b0000000111111111;
-      uint8_t periodShift = value >> 9 & 0b00000111;
-      uint32_t periodTime =  periodBase << periodShift;
+    // DShot Frame: EEEMMMMMMMMM
+    uint32_t periodBase = value & 0b0000000111111111;
+    uint8_t periodShift = value >> 9 & 0b00000111;
+    *commutation_period =  periodBase << periodShift;
+
+    return true;
 
 
     //   #if debug
@@ -341,5 +351,4 @@ bool processTelemetryResponse(uint16_t *commutation_period) {
     //     Serial.print("%");
     //   #endif
     //   Serial.println();
-  }
 }
