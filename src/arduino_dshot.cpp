@@ -23,7 +23,7 @@
  * Even if response processing can be sped up, at the higher frequencies we would
  * still struggle to serial print the results.
  */
-#define frequency F500
+#define main_loop_freq 500
 
 // Always inverted (bidir dshot)
 
@@ -99,7 +99,7 @@ void readTelemetryResponse() {
   pinMode(pinDshot, INPUT_PULLUP);
 
   // Delay around 26us
-  DELAY_CYCLES(410);
+  DELAY_CYCLES(300);
 
   register uint8_t ices1High = 0b01000000;
   register uint16_t prevVal = 0;
@@ -139,6 +139,7 @@ void readTelemetryResponse() {
   }
 
   pinMode(pinDshot, OUTPUT);
+  CLR_BIT(PORTD,portPinIsrTimer); //TODO move this to application code
 
   uint32_t temp_dshot_response;
   // Set all 21 possible bits to one and flip the once that should be zero
@@ -202,51 +203,32 @@ void sendInvertedDshot300Bit(uint8_t bit) {
   if(bit) {
     CLR_BIT(PORTD,portPinDshot);
     //DELAY_CYCLES(40);
-    DELAY_CYCLES(37);
+    DELAY_CYCLES(36);
     SET_BIT(PORTD,portPinDshot);
     //DELAY_CYCLES(13);
-    DELAY_CYCLES(7);
+    DELAY_CYCLES(6);
   } else {
     CLR_BIT(PORTD,portPinDshot);
     //DELAY_CYCLES(20);
-    DELAY_CYCLES(16);
+    DELAY_CYCLES(15);
     SET_BIT(PORTD,portPinDshot);
     //DELAY_CYCLES(33);
-    DELAY_CYCLES(25);
+    DELAY_CYCLES(24);
   }
 }
 
 void setupTimer() {
   cli();
 
+  TCCR3B = 0;
+  TCCR3A = 0;
+  TIMSK3 = 0;
   TCNT3 = 0;
-  TCCR3B = 0b00000010; // Prescaler 8
 
-  switch(frequency) {
-    case F500: {
-      // 500 Hz (16000000/((3999 + 1) * 8))
-      OCR3A = 3999;
-    } break;
-
-    case F1k: {
-      OCR3A = 1999;
-    } break;
-
-    case F2k: {
-      OCR3A = 999;
-    } break;
-
-    case F4k: {
-      OCR3A = 499;
-    } break;
-
-    default: {
-      OCR3A = 249;
-    } break;
-  }
-
-  TCCR3A = 0b00001010; // CTC mode - count to OCR3A
-  TIMSK3 = 0b00000010; // Enable INT on compare match A
+  OCR3A = F_CPU/(8*main_loop_freq)-1;
+  TIFR3 = _BV(OCF3A); //clear flag
+  TIMSK3 = _BV(OCIE3A);
+  TCCR3B = _BV(WGM32) | _BV(CS31); // CTC mode, prescaler 8
 
   sei();
 }

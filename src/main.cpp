@@ -1,14 +1,16 @@
 #include "Arduino.h"
 #include "arduino_dshot.hpp"
 #include "common.hpp"
+#include "control.hpp"
 
-#define ESC_TIMEOUT_LOOPS 10
+#define ESC_TIMEOUT_LOOPS 100
+#define INIT_LOOPS 2500 // 5 second of command 0
 #define pinMainLoop 5
-#define portPinMainLoop PD5 //green led
+#define portPinMainLoop PC6 //green led
 
 void setup() {
     Serial.begin(115200);
-    while(!Serial);
+    //while(!Serial); actually waits for port to be open on the host!
     dshotSetup();
     pinMode(pinMainLoop, OUTPUT);
     stopMotor();
@@ -17,8 +19,9 @@ void setup() {
 void loop() {  
     if(v_FRAME_COMPLETE)/* Timer ISR for DSHOT just finished - previous command sent and RPM feedback hopefully received - run main program loop synchronously with this */
     {
-        SET_BIT(PORTD, portPinMainLoop);
+        SET_BIT(PORTC, portPinMainLoop);
         static uint8_t esc_missing_ctr;
+        static uint16_t init_loop_ctr;
         static uint16_t commutation_period = INT16_MAX;
 
         bool crc_ok;
@@ -37,14 +40,23 @@ void loop() {
             esc_missing_ctr++;
         }
 
-        if(esc_missing_ctr >= ESC_TIMEOUT_LOOPS)
+        if(init_loop_ctr < INIT_LOOPS){
+            init_loop_ctr++;
+        }
+
+        if((init_loop_ctr < INIT_LOOPS) || (esc_missing_ctr >= ESC_TIMEOUT_LOOPS))
         {
             Serial.println("ESC Missing Timeout");
             stopMotor();
-            return;
         }
-
-        requestThrottle(((millis())>4)%1000,true);
-        CLR_BIT(PORTD, portPinMainLoop);
+        else
+        {
+            uint16_t throttle;
+            bool is_fwd;
+            
+            run_control(commutation_period, RPM_2_RAW(1000), &throttle, &is_fwd);
+            requestThrottle(throttle, is_fwd);
+        }
+        CLR_BIT(PORTC, portPinMainLoop);
     }
 }

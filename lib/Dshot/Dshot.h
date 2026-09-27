@@ -1,14 +1,6 @@
 #ifndef Dshot_H
 #define Dshot_H
 
-enum FREQUENCY {
-  F500 = 500,
-  F1k = 1000,
-  F2k = 2000,
-  F4k = 4000,
-  F8k = 8000
-};
-
 class Dshot {
   public:
     Dshot(bool inverted);
