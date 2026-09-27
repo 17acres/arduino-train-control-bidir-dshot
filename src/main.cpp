@@ -32,8 +32,12 @@ void loop() {
         {
             esc_missing_ctr = 0;
         }
+        else if (esc_missing_ctr < ESC_TIMEOUT_LOOPS)
+        {
+            esc_missing_ctr++;
+        }
 
-        if(esc_missing_ctr > ESC_TIMEOUT_LOOPS)
+        if(esc_missing_ctr >= ESC_TIMEOUT_LOOPS)
         {
             Serial.println("ESC Missing Timeout");
             stopMotor();
