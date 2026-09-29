@@ -22,8 +22,9 @@
  *
  * Even if response processing can be sped up, at the higher frequencies we would
  * still struggle to serial print the results.
+ * 
+ * NOT USING TIMER FOR THIS SO IT CAN BE USED FOR HIGH ACCURACY RC PWM MEASUREMENT
  */
-#define main_loop_freq 500
 
 // Always inverted (bidir dshot)
 
@@ -86,7 +87,6 @@ void sendDshot300Frame();
 void sendInvertedDshot300Bit(uint8_t bit);
 void readTelemetryResponse();
 
-// CALLED FROM ISR
 void readTelemetryResponse()
 {
     // Set to Input in order to process the response - this will be at 3.3V level
@@ -144,7 +144,6 @@ void readTelemetryResponse()
 }
 
 /**
- * CALLED FROM ISR
  * Frames are sent MSB first.
  *
  * Unfortunately we can't  rotate through carry on an ATMega.
@@ -167,7 +166,6 @@ void sendDshot300Frame()
 }
 
 /**
- * CALLED FROM ISR
  * digitalWrite takes about 3.4us to execute, that's why we switch ports directly.
  * Switching ports directly will allow a transition in 0.19us or 190ns.
  *
@@ -201,30 +199,14 @@ void sendInvertedDshot300Bit(uint8_t bit)
     }
 }
 
-void setupTimer()
+void doDshotTransaction()
 {
-    cli();
-
-    TCCR3B = 0;
-    TCCR3A = 0;
-    TIMSK3 = 0;
-    TCNT3 = 0;
-
-    OCR3A = F_CPU / (8 * main_loop_freq) - 1;
-    TIFR3 = _BV(OCF3A); // clear flag
-    TIMSK3 = _BV(OCIE3A);
-    TCCR3B = _BV(WGM32) | _BV(CS31); // CTC mode, prescaler 8
-
-    sei();
-}
-
-ISR(TIMER3_COMPA_vect)
-{
-    SET_BIT(PORTD, portPinIsrTimer);
-    sendDshot300Frame();
-    readTelemetryResponse();
-    v_FRAME_COMPLETE = true;
-    CLR_BIT(PORTD, portPinIsrTimer);
+    // This is a critical section since it is actually doing the communication
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+    {
+        sendDshot300Frame();
+        readTelemetryResponse();
+    }
 }
 
 void dshotSetup()
@@ -235,17 +217,11 @@ void dshotSetup()
     // Set the default signal Level
     SET_BIT(PORTD, portPinDshot);
     CLR_BIT(PORTD, portPinIsrTimer);
-
-    setupTimer();
 }
 
 void stopMotor()
 {
-    uint16_t tmp_frame = dshot.buildFrame(0, 0);
-    ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-    {
-        v_FRAME = tmp_frame;
-    }
+    uint16_t v_FRAME = dshot.buildFrame(0, 0);
 }
 
 /* Has atomic protections. Input range of 0 to 999, will saturate */
@@ -261,11 +237,7 @@ void requestThrottle(uint16_t throttle, bool is_fwd)
     {
         throttle += NUM_VALUES_PER_DIR;
     }
-    uint16_t tmp_frame = dshot.buildFrame(throttle, 0);
-    ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-    {
-        v_FRAME = tmp_frame;
-    }
+    uint16_t v_FRAME = dshot.buildFrame(throttle, 0);
 }
 
 bool processTelemetryResponse(uint16_t *commutation_period)
@@ -292,7 +264,7 @@ bool processTelemetryResponse(uint16_t *commutation_period)
     uint8_t bitCount = 0;
     for (uint8_t i = 1; i < buffSize; i += 1)
     {
-        Serial.print(state_durations_local[i]);
+        Serial.print(v_STATE_DURATIONS[i]);
         Serial.print(",");
         // We are done once the first intereval has a 0 value or the duration is too long (will cause crc failure in that case).
         if ( (state_durations_local[i] == 0) || (state_durations_local[i] >= SIZE_LUT) )
