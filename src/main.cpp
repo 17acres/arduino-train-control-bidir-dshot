@@ -7,8 +7,7 @@
 #define INIT_LOOPS 2500 // 5 second of command 0
 #define pinMainLoop 5
 #define portPinMainLoop PC6 // green led
-#define main_loop_freq 500
-
+#define main_loop_millis 2
 
 void setup()
 {
@@ -16,23 +15,29 @@ void setup()
     // while(!Serial); actually waits for port to be open on the host!
     dshotSetup();
     pinMode(pinMainLoop, OUTPUT);
-    stopMotor();
 }
 
 void loop()
 {
-    doDshotTransaction();
-    SET_BIT(PORTC, portPinMainLoop);
     static uint8_t esc_missing_ctr;
     static uint16_t init_loop_ctr;
     static uint16_t commutation_period = INT16_MAX;
+    static bool crc_ok = false;
+    static uint32_t last_millis = 0;
 
-    bool crc_ok;
+    uint16_t throttle;
+    bool is_fwd = false;
 
-    v_FRAME_COMPLETE = false;
-
-    crc_ok = processTelemetryResponse(&commutation_period); /* will not write to commutation_period if crc is faulty */
-
+    SET_BIT(PORTC, portPinMainLoop);
+    uint32_t current_millis = millis();
+    //spin until main_loop_millis has elapsed
+    if((current_millis-last_millis)<main_loop_millis)
+    {
+        CLR_BIT(PORTC, portPinMainLoop);
+        return;
+    }
+    
+    SET_BIT(PORTC, portPinMainLoop);
     if (crc_ok)
     {
         esc_missing_ctr = 0;
@@ -47,20 +52,19 @@ void loop()
         init_loop_ctr++;
     }
 
-        if ((init_loop_ctr < INIT_LOOPS) || (esc_missing_ctr >= ESC_TIMEOUT_LOOPS))
-        {
-            Serial.println("ESC Missing Timeout");
-            stopMotor();
-        }
-        else
-        {
-            uint16_t throttle;
-            bool is_fwd;
-            CLR_BIT(PORTC, portPinMainLoop); //time the control algo specifically
-            run_control(commutation_period, RPM_2_RAW(1000), &throttle, &is_fwd);
-            SET_BIT(PORTC, portPinMainLoop);
-            requestThrottle(throttle, is_fwd);
-        }
-        CLR_BIT(PORTC, portPinMainLoop);
+    if ((init_loop_ctr < INIT_LOOPS) || (esc_missing_ctr >= ESC_TIMEOUT_LOOPS))
+    {
+        Serial.println("ESC Missing Timeout");
+        throttle = THROTTLE_MOTOR_STOP;
     }
+    else
+    {
+        CLR_BIT(PORTC, portPinMainLoop); // time the control algo specifically
+        run_control(commutation_period, RPM_2_RAW(1000), &throttle, &is_fwd);
+        SET_BIT(PORTC, portPinMainLoop);
+    }
+    crc_ok = doDshotTransaction(throttle, is_fwd, &commutation_period); /* will not write to commutation_period if crc is faulty */
+    last_millis = current_millis;
+    CLR_BIT(PORTC, portPinMainLoop);
+
 }

@@ -22,7 +22,7 @@
  *
  * Even if response processing can be sped up, at the higher frequencies we would
  * still struggle to serial print the results.
- * 
+ *
  * NOT USING TIMER FOR THIS SO IT CAN BE USED FOR HIGH ACCURACY RC PWM MEASUREMENT
  */
 
@@ -31,8 +31,8 @@
 // DSHOT Output pin
 #define pinDshot 4 // PD4 is timer1 input capture
 #define portPinDshot PD4
-#define pinIsrTimer 6 // PD7 is timer2 ISR-running-indicator
-#define portPinIsrTimer PD7
+#define pinCriticalSection 6 // PD7 is timer2 ISR-running-indicator
+#define portPinCriticalSection PD7
 
 // Timer 1 for input capture of BDSHOT
 // Timer 3 for loop timing
@@ -41,15 +41,9 @@
 #define MIN_THR 48u
 #define NUM_VALUES_PER_DIR 1000u // reverse commands are this much above fwd commands
 
-Dshot dshot = new Dshot(true);
+#define buffSize 20 // for state_durations array
 
-/* ISR Variables */
-volatile bool v_FRAME_COMPLETE = false;
-static volatile uint16_t v_FRAME = dshot.buildFrame(0, 0);
-// Buffer for counting duration between falling and rising edges
-// Do the calculation of DSHOT_RESPONSE here so it is easier to read atomically
-#define buffSize 20
-static volatile uint8_t v_STATE_DURATIONS[buffSize];
+Dshot dshot = new Dshot(true);
 
 #define SIZE_LUT 23
 // Duration LUT - considerably faster than division
@@ -83,11 +77,13 @@ const uint8_t state_duration_to_bits_lut[SIZE_LUT] = {
 
 #define DELAY_CYCLES(n) __builtin_avr_delay_cycles(n)
 
-void sendDshot300Frame();
-void sendInvertedDshot300Bit(uint8_t bit);
-void readTelemetryResponse();
+static void sendDshot300Frame(uint16_t frame);
+static void sendInvertedDshot300Bit(uint8_t bit);
+static void readTelemetryResponse(uint8_t state_durations[buffSize]);
+static bool processTelemetryResponse(const uint8_t state_durations[], uint16_t *commutation_period);
+static uint16_t buildFrame(uint16_t throttle, bool is_fwd);
 
-void readTelemetryResponse()
+static void readTelemetryResponse(uint8_t state_durations[buffSize])
 {
     // Set to Input in order to process the response - this will be at 3.3V level
     // I suppose we need to wait long enough anyway so why not use the slow Arduino version
@@ -110,7 +106,7 @@ void readTelemetryResponse()
     TCNT1 = 0x00;
 
     TIFR1 = (1 << ICF1) | (1 << OCF1A) | (1 << TOV1); // clear all timer flags
-    for (p_state_duration = v_STATE_DURATIONS; p_state_duration <= &v_STATE_DURATIONS[buffSize - 1];)
+    for (p_state_duration = state_durations; p_state_duration <= &state_durations[buffSize - 1];)
     {
         // wait for edge or overflow (output compare match)
         while (!(tifr = (TIFR1 & ((1 << ICF1) | (1 << OCF1A)))))
@@ -123,7 +119,7 @@ void readTelemetryResponse()
         if (tifr & (1 << OCF1A))
         {
             // Ignore overflow at the beginning of capture, puts garbage in first element?
-            if (p_state_duration != &v_STATE_DURATIONS[0])
+            if (p_state_duration != &state_durations[0])
             {
                 *p_state_duration = 0; // so it doesn't read past the end of the array
                 break;
@@ -132,7 +128,6 @@ void readTelemetryResponse()
 
         TCCR1B ^= ices1High;                // toggle the trigger edge
         TIFR1 = (1 << ICF1) | (1 << OCF1A); // clear input capture and output compare flag bit
-
 
         *p_state_duration = ICR1 - prevVal;
 
@@ -154,14 +149,13 @@ void readTelemetryResponse()
  *              it might make sense to arange it in a way that is benefitial for
  *              transmission.
  */
-void sendDshot300Frame()
+static void sendDshot300Frame(uint16_t frame)
 {
-    uint16_t temp = v_FRAME;
     uint8_t offset = 0;
     do
     {
-        sendInvertedDshot300Bit((temp & 0x8000) >> 15);
-        temp <<= 1;
+        sendInvertedDshot300Bit((frame & 0x8000) >> 15);
+        frame <<= 1;
     } while (++offset < 0x10);
 }
 
@@ -177,7 +171,7 @@ void sendDshot300Frame()
  *
  * The delays after switching back to low are to account for the overhead of going through the loop ins sendBitsDshot*
  */
-void sendInvertedDshot300Bit(uint8_t bit)
+static void sendInvertedDshot300Bit(uint8_t bit)
 {
     if (bit)
     {
@@ -199,64 +193,70 @@ void sendInvertedDshot300Bit(uint8_t bit)
     }
 }
 
-void doDshotTransaction()
+bool doDshotTransaction(uint16_t throttle, bool is_fwd, uint16_t *p_commutation_period)
 {
+    // Buffer for counting duration between falling and rising edges
+    static uint8_t state_durations[buffSize];
+
+    uint16_t frame = buildFrame(throttle, is_fwd);
+
     // This is a critical section since it is actually doing the communication
+    SET_BIT(PORTD, portPinCriticalSection);
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
     {
-        sendDshot300Frame();
-        readTelemetryResponse();
+        sendDshot300Frame(frame);
+        readTelemetryResponse(state_durations);
     }
+    CLR_BIT(PORTD, portPinCriticalSection);
+
+    return processTelemetryResponse(state_durations, p_commutation_period);
 }
 
 void dshotSetup()
 {
     pinMode(pinDshot, OUTPUT);
-    pinMode(pinIsrTimer, OUTPUT);
+    pinMode(pinCriticalSection, OUTPUT);
 
     // Set the default signal Level
     SET_BIT(PORTD, portPinDshot);
-    CLR_BIT(PORTD, portPinIsrTimer);
+    CLR_BIT(PORTD, portPinCriticalSection);
 }
 
-void stopMotor()
+static uint16_t buildFrame(uint16_t throttle, bool is_fwd)
 {
-    uint16_t v_FRAME = dshot.buildFrame(0, 0);
+    if (throttle == THROTTLE_MOTOR_STOP)
+    {
+        throttle = 0;
+    }
+    else
+    {
+        if (throttle >= NUM_VALUES_PER_DIR)
+        {
+            throttle = NUM_VALUES_PER_DIR - 1;
+        }
+
+        if (is_fwd)
+        {
+            throttle += MIN_THR;
+        }
+        else
+        {
+            throttle += (MIN_THR + NUM_VALUES_PER_DIR);
+        }
+    }
+
+    return dshot.buildFrame(throttle, 0);
 }
 
-/* Has atomic protections. Input range of 0 to 999, will saturate */
-void requestThrottle(uint16_t throttle, bool is_fwd)
-{
-    if (throttle >= NUM_VALUES_PER_DIR)
-    {
-        throttle = NUM_VALUES_PER_DIR - 1;
-    }
-    throttle += MIN_THR;
-
-    if (!is_fwd)
-    {
-        throttle += NUM_VALUES_PER_DIR;
-    }
-    uint16_t v_FRAME = dshot.buildFrame(throttle, 0);
-}
-
-bool processTelemetryResponse(uint16_t *commutation_period)
+static bool processTelemetryResponse(const uint8_t state_durations[], uint16_t *commutation_period)
 {
     // Statistics for success rate
     static uint16_t ls_receivedPackets = 0;
     static uint16_t ls_successPackets = 0;
 
-    static volatile uint8_t state_durations_local[buffSize];
     uint32_t dshotResponse;
 
-    v_FRAME_COMPLETE = false;
     ls_receivedPackets++;
-
-    ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-    {
-        memcpy((void *)state_durations_local, (void *)v_STATE_DURATIONS, sizeof(state_durations_local));
-    }
-    
 
     // Set all 21 possible bits to one and flip the once that should be zero
     dshotResponse = 0x001FFFFF;
@@ -265,19 +265,18 @@ bool processTelemetryResponse(uint16_t *commutation_period)
     for (uint8_t i = 1; i < buffSize; i += 1)
     {
         // We are done once the first intereval has a 0 value or the duration is too long (will cause crc failure in that case).
-        if ( (state_durations_local[i] == 0) || (state_durations_local[i] >= SIZE_LUT) )
+        if ((state_durations[i] == 0) || (state_durations[i] >= SIZE_LUT))
         {
             break;
         }
 
         bitValue ^= 0x01; // Toggle bit value - always start with 0
-        state_durations_local[i] = state_duration_to_bits_lut[state_durations_local[i]];
-        for (uint8_t j = 0; j < state_durations_local[i]; j += 1)
+        uint8_t num_constant_bits = state_duration_to_bits_lut[state_durations[i]];
+        for (uint8_t j = 0; j < num_constant_bits; j += 1)
         {
             dshotResponse ^= (bitValue << (20 - bitCount++));
         }
     }
-    
 
     // Decode GCR 21 -> 20 bit (since the 21st bit is definetly a 0)
     dshotResponse ^= (dshotResponse >> 1);
