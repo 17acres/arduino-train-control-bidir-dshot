@@ -22,14 +22,14 @@ color=4287582722
 conv_options=0
 conversion_type=0
 enabled=true
-name=t2isr
+name=dshotcritical
 
 [D2]
 color=4291559424
 conv_options=0
 conversion_type=0
 enabled=true
-name=main/serial
+name=main
 
 [D3]
 color=4294277376
@@ -67,7 +67,7 @@ enabled=false
 name=D7
 
 [decode_signal0]
-channel0\assigned_signal_name=t2isr
+channel0\assigned_signal_name=dshotcritical
 channel0\initial_pin_state=2
 channel0\name=Data
 channels=1
@@ -83,10 +83,10 @@ decoder0\row1\visible=true
 decoder0\visible=true
 decoders=1
 enabled=true
-name=t2isr
+name=dshotcritical
 
 [decode_signal1]
-channel0\assigned_signal_name=main/serial
+channel0\assigned_signal_name=main
 channel0\initial_pin_state=2
 channel0\name=Data
 channels=1
@@ -180,8 +180,8 @@ name=gear
 
 [meta_obj0]
 assoc_view=0
-end_time=22 serialization::archive 19 0 0 0 0 217350 0 84710 1677889 94440343 0 -8 0 0 6
-start_time=22 serialization::archive 19 0 0 0 0 216412 49999999 99816174 82269768 97058193 0 -8 0 0 6
+end_time=22 serialization::archive 19 0 0 0 0 1040849 99999999 99349742 37447704 58142738 0 -8 0 0 6
+start_time=22 serialization::archive 19 0 0 0 0 1074062 50000000 172084 56881689 92637656 0 -8 0 0 6
 type=selection
 
 [view0]
@@ -199,9 +199,9 @@ D4\trace_height=32
 D5\trace_height=32
 D6\trace_height=32
 D7\trace_height=32
-offset=22 serialization::archive 19 0 0 0 0 0 0 0 0 0 0 0 0 0 6
-scale=3.5033632286995515e-05
+offset=22 serialization::archive 19 0 0 0 0 951789 34069739 94286696 77552607 84735121 65082828 -8 0 0 6
+scale=1.3723425123319978e-06
 segment_display_mode=3
-splitter_state=@ByteArray(\0\0\0\xff\0\0\0\x1\0\0\0\x2\0\0\0u\0\0\x5\xb8\x1\0\0\0\x1\x1\0\0\0\x1\0)
+splitter_state=@ByteArray(\0\0\0\xff\0\0\0\x1\0\0\0\x2\0\0\0|\0\0\x6\xff\x1\0\0\0\x1\x1\0\0\0\x1\0)
 v_offset=-25
 zero_offset=22 serialization::archive 19 0 0 0 0 0 0 0 0 0 0 0 0 0 6

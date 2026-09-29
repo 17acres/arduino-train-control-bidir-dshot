@@ -7,7 +7,7 @@
 #define INIT_LOOPS 2500 // 5 second of command 0
 #define pinMainLoop 5
 #define portPinMainLoop PC6 // green led
-#define main_loop_millis 2
+#define main_loop_micros 2000
 
 void setup()
 {
@@ -28,12 +28,10 @@ void loop()
     uint16_t throttle;
     bool is_fwd = false;
 
-    SET_BIT(PORTC, portPinMainLoop);
     uint32_t current_micros = micros();
-    //spin until main_loop_millis has elapsed
-    if((current_micros-last_micros)<main_loop_millis)
+    //spin until main_loop_micros has elapsed
+    if((current_micros-last_micros)<main_loop_micros)
     {
-        CLR_BIT(PORTC, portPinMainLoop);
         return;
     }
     
@@ -59,9 +57,7 @@ void loop()
     }
     else
     {
-        CLR_BIT(PORTC, portPinMainLoop); // time the control algo specifically
         run_control(commutation_period, RPM_2_RAW(1000), &throttle, &is_fwd);
-        SET_BIT(PORTC, portPinMainLoop);
     }
     crc_ok = doDshotTransaction(throttle, is_fwd, &commutation_period); /* will not write to commutation_period if crc is faulty */
     last_micros = current_micros;
