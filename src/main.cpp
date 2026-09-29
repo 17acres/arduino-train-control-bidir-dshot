@@ -23,15 +23,15 @@ void loop()
     static uint16_t init_loop_ctr;
     static uint16_t commutation_period = INT16_MAX;
     static bool crc_ok = false;
-    static uint32_t last_millis = 0;
+    static uint32_t last_micros = 0;
 
     uint16_t throttle;
     bool is_fwd = false;
 
     SET_BIT(PORTC, portPinMainLoop);
-    uint32_t current_millis = millis();
+    uint32_t current_micros = micros();
     //spin until main_loop_millis has elapsed
-    if((current_millis-last_millis)<main_loop_millis)
+    if((current_micros-last_micros)<main_loop_millis)
     {
         CLR_BIT(PORTC, portPinMainLoop);
         return;
@@ -64,7 +64,7 @@ void loop()
         SET_BIT(PORTC, portPinMainLoop);
     }
     crc_ok = doDshotTransaction(throttle, is_fwd, &commutation_period); /* will not write to commutation_period if crc is faulty */
-    last_millis = current_millis;
+    last_micros = current_micros;
     CLR_BIT(PORTC, portPinMainLoop);
 
 }
