@@ -48,7 +48,7 @@ static volatile uint16_t v_FRAME = dshot.buildFrame(0, 0);
 // Buffer for counting duration between falling and rising edges
 // Do the calculation of DSHOT_RESPONSE here so it is easier to read atomically
 #define buffSize 20
-static volatile uint16_t v_STATE_DURATIONS[buffSize];
+static volatile uint8_t v_STATE_DURATIONS[buffSize];
 
 #define SIZE_LUT 23
 // Duration LUT - considerably faster than division
@@ -99,7 +99,7 @@ void readTelemetryResponse()
     register uint8_t ices1High = 0b01000000;
     register uint16_t prevVal = 0;
     register uint8_t tifr;
-    volatile register uint16_t *p_state_duration;
+    volatile register uint8_t *p_state_duration;
 
     TCCR1A = 0b00000001; // Toggle OC1A on compare match
     TCCR1B = 0b00000010; // trigger on falling edge, prescaler 8, filter off
@@ -274,7 +274,7 @@ bool processTelemetryResponse(uint16_t *commutation_period)
     static uint16_t ls_receivedPackets = 0;
     static uint16_t ls_successPackets = 0;
 
-    static volatile uint16_t state_durations_local[buffSize];
+    static volatile uint8_t state_durations_local[buffSize];
     uint32_t dshotResponse;
 
     v_FRAME_COMPLETE = false;
@@ -292,8 +292,6 @@ bool processTelemetryResponse(uint16_t *commutation_period)
     uint8_t bitCount = 0;
     for (uint8_t i = 1; i < buffSize; i += 1)
     {
-        Serial.print(state_durations_local[i]);
-        Serial.print(",");
         // We are done once the first intereval has a 0 value or the duration is too long (will cause crc failure in that case).
         if ( (state_durations_local[i] == 0) || (state_durations_local[i] >= SIZE_LUT) )
         {
@@ -324,10 +322,8 @@ bool processTelemetryResponse(uint16_t *commutation_period)
 
     if (crc != crcExpected)
     {
-        Serial.println("X");
         return false;
     }
-    Serial.println("Y");
     ls_successPackets++;
 
     // Reset packet count if overflows

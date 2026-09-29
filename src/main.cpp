@@ -55,8 +55,9 @@ void loop()
         {
             uint16_t throttle;
             bool is_fwd;
-
+            CLR_BIT(PORTC, portPinMainLoop); //time the control algo specifically
             run_control(commutation_period, RPM_2_RAW(1000), &throttle, &is_fwd);
+            SET_BIT(PORTC, portPinMainLoop);
             requestThrottle(throttle, is_fwd);
         }
         CLR_BIT(PORTC, portPinMainLoop);

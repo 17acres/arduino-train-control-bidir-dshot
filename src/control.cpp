@@ -14,20 +14,21 @@ void run_control(uint16_t commutation_period, uint16_t speed_tgt, uint16_t *thro
 
     if (filtered_rpm >= speed_tgt)
     {
-        throttle = 0;
+        if(last_throttle>0)
+            throttle = last_throttle-1;
+        else
+            throttle = 0;
     }
     else
     {
-        throttle = (speed_tgt - filtered_rpm) >> 2; // TODO velocity feed forward
+        throttle = (speed_tgt - filtered_rpm) >> 4; // TODO velocity feed forward
     }
 
-    // Serial.print(commutation_period);
-    // Serial.print(",");
-    // Serial.print(RAW_2_RPM(unfilt_rpm));
-    // Serial.print(",");
-    // Serial.print(RAW_2_RPM(filtered_rpm));
-    // Serial.print(",");
-    // Serial.println(throttle);
+    Serial.print(RAW_2_RPM(unfilt_rpm));
+    Serial.print(",");
+    Serial.print(RAW_2_RPM(filtered_rpm));
+    Serial.print(",");
+    Serial.println(throttle);
 
     last_throttle = throttle;
     *throttle_ptr = throttle;
