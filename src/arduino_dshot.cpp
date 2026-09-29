@@ -3,6 +3,7 @@
 #include "arduino_dshot.hpp"
 #include <util/atomic.h>
 #include "common.hpp"
+#include "rc_pwm.hpp"
 /**
  * Update frequencies from 2kHz onwards tend to cause issues in regards
  * to processing the DShot response and will result in actual 3kHz instead.
@@ -204,8 +205,10 @@ bool doDshotTransaction(uint16_t throttle, bool is_fwd, uint16_t *p_commutation_
     SET_BIT(PORTD, portPinCriticalSection);
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
     {
+        disableRcPwm();
         sendDshot300Frame(frame);
         readTelemetryResponse(state_durations);
+        reEnableRcPwm();
     }
     CLR_BIT(PORTD, portPinCriticalSection);
 
