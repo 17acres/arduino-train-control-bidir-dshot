@@ -49,8 +49,9 @@ uint32_t v_DSHOT_RESPONSE = 0;
 bool v_FRAME_COMPLETE = false;
 volatile uint16_t v_FRAME = dshot.buildFrame(0, 0);
 
+#define SIZE_LUT 23
 // Duration LUT - considerably faster than division
-const uint8_t state_duration_to_bits_lut[] = {
+const uint8_t state_duration_to_bits_lut[SIZE_LUT] = {
   0,
   0,
   0,
@@ -92,7 +93,7 @@ void readTelemetryResponse() {
   // Buffer for counting duration between falling and rising edges
   // Do the calculation of DSHOT_RESPONSE here so it is easier to read atomically
   #define buffSize 20
-  uint16_t counter[buffSize];
+  uint16_t state_durations[buffSize];
   
   // Set to Input in order to process the response - this will be at 3.3V level
   //I suppose we need to wait long enough anyway so why not use the slow Arduino version
@@ -104,7 +105,7 @@ void readTelemetryResponse() {
   register uint8_t ices1High = 0b01000000;
   register uint16_t prevVal = 0;
   register uint8_t tifr;
-  register uint16_t *pCapDat;
+  register uint16_t *p_state_duration;
 
   TCCR1A = 0b00000001; // Toggle OC1A on compare match
   TCCR1B = 0b00000010; // trigger on falling edge, prescaler 8, filter off
@@ -115,16 +116,18 @@ void readTelemetryResponse() {
   TCNT1 = 0x00;
 
   TIFR1 = (1 << ICF1) | (1 << OCF1A) | (1 << TOV1); // clear all timer flags
-  for(pCapDat = counter; pCapDat <= &counter[buffSize - 1];) {
+  for(p_state_duration = state_durations; p_state_duration <= &state_durations[buffSize - 1];) {
     // wait for edge or overflow (output compare match)
     while(!(tifr = (TIFR1 & ((1 << ICF1) | (1 << OCF1A))))) {}
 
     uint16_t val = ICR1;
+    uint16_t delta = ICR1-prevVal;
 
     // Break if counter overflows
     if(tifr & (1 << OCF1A)) {
-      // Ignore overflow at the beginning of capture
-      if(pCapDat != counter) {
+      // Ignore overflow at the beginning of capture, puts garbage in first element?
+      if(p_state_duration != &state_durations[0]) {
+        *p_state_duration = 0; //so it doesn't read past the end of the array
         break;
       }
     }
@@ -132,10 +135,18 @@ void readTelemetryResponse() {
     TCCR1B ^= ices1High; // toggle the trigger edge
     TIFR1 = (1 << ICF1) | (1 << OCF1A); // clear input capture and output compare flag bit
 
-    *pCapDat = val - prevVal;
+    if( (prevVal>val) || (delta >= SIZE_LUT) )
+    {
+      *p_state_duration = 0; //something wrong
+      break;
+    }
+    else
+    {
+        *p_state_duration = delta;
+    }
 
     prevVal = val;
-    pCapDat++;
+    p_state_duration++;
   }
 
   pinMode(pinDshot, OUTPUT);
@@ -148,13 +159,15 @@ void readTelemetryResponse() {
   uint8_t bitCount = 0;
   for(uint8_t i = 1; i < buffSize; i += 1) {
     // We are done once the first intereval has a 0 value.
-    if(counter[i] == 0) {
+    if(state_durations[i] == 0) {
       break;
     }
-
+    if(state_durations[i]>=SIZE_LUT){
+      SET_BIT(PORTD,portPinIsrTimer);
+    }
     bitValue ^= 0x01; // Toggle bit value - always start with 0
-    counter[i] = state_duration_to_bits_lut[counter[i]];
-    for(uint8_t j = 0; j < counter[i]; j += 1) {
+    state_durations[i] = state_duration_to_bits_lut[state_durations[i]];
+    for(uint8_t j = 0; j < state_durations[i]; j += 1) {
       temp_dshot_response ^= (bitValue << (20 - bitCount++));
     }
   }
