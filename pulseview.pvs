@@ -1,5 +1,5 @@
 [General]
-decode_signals=4
+decode_signals=5
 meta_objs=1
 views=1
 
@@ -42,15 +42,15 @@ name=D3
 color=4293776384
 conv_options=0
 conversion_type=0
-enabled=false
-name=D4
+enabled=true
+name=throttle
 
 [D5]
 color=4285780502
 conv_options=0
 conversion_type=0
-enabled=false
-name=D5
+enabled=true
+name=gear
 
 [D6]
 color=4281623972
@@ -131,9 +131,9 @@ enabled=true
 name=DShot
 
 [decode_signal3]
-channel0\assigned_signal_name=D3
+channel0\assigned_signal_name=throttle
 channel0\initial_pin_state=2
-channel0\name=DIN
+channel0\name=Data
 channels=1
 color=4281479850
 conv_options=0
@@ -143,26 +143,45 @@ decoder0\ann_class1\visible=true
 decoder0\ann_class2\visible=true
 decoder0\ann_class3\visible=true
 decoder0\ann_class4\visible=true
-decoder0\id=dshot
+decoder0\id=pwm
 decoder0\option0\name=bidir
 decoder0\option0\type=s
 decoder0\option0\value=@ByteArray(True\0)
 decoder0\option1\name=dshot_rate
 decoder0\option1\type=s
 decoder0\option1\value=@ByteArray(150\0)
-decoder0\options=2
+decoder0\options=0
 decoder0\row0\visible=true
 decoder0\row1\visible=true
 decoder0\row2\visible=true
 decoder0\visible=true
 decoders=1
 enabled=true
-name=DShot
+name=throttle
+
+[decode_signal4]
+channel0\assigned_signal_name=gear
+channel0\initial_pin_state=2
+channel0\name=Data
+channels=1
+color=4289364530
+conv_options=0
+conversion_type=0
+decoder0\ann_class0\visible=true
+decoder0\ann_class1\visible=true
+decoder0\id=pwm
+decoder0\options=0
+decoder0\row0\visible=true
+decoder0\row1\visible=true
+decoder0\visible=true
+decoders=1
+enabled=true
+name=gear
 
 [meta_obj0]
 assoc_view=0
-end_time=22 serialization::archive 19 0 0 0 0 233131 25000000 51403 32604014 47478216 0 -8 0 0 6
-start_time=22 serialization::archive 19 0 0 0 0 215949 99999999 99961253 21644058 20367392 0 -8 0 0 6
+end_time=22 serialization::archive 19 0 0 0 0 217350 0 84710 1677889 94440343 0 -8 0 0 6
+start_time=22 serialization::archive 19 0 0 0 0 216412 49999999 99816174 82269768 97058193 0 -8 0 0 6
 type=selection
 
 [view0]
@@ -180,9 +199,9 @@ D4\trace_height=32
 D5\trace_height=32
 D6\trace_height=32
 D7\trace_height=32
-offset=22 serialization::archive 19 0 0 0 0 117102 19451265 79726407 53847957 25677033 48396187 -8 0 0 6
-scale=1.3351491361585087e-06
+offset=22 serialization::archive 19 0 0 0 0 0 0 0 0 0 0 0 0 0 6
+scale=3.5033632286995515e-05
 segment_display_mode=3
 splitter_state=@ByteArray(\0\0\0\xff\0\0\0\x1\0\0\0\x2\0\0\0u\0\0\x5\xb8\x1\0\0\0\x1\x1\0\0\0\x1\0)
-v_offset=-27
+v_offset=-25
 zero_offset=22 serialization::archive 19 0 0 0 0 0 0 0 0 0 0 0 0 0 6
