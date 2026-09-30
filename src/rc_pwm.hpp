@@ -8,4 +8,6 @@ void reEnableRcPwm();
 
 bool checkRcMissing();
 
-extern volatile uint16_t v_THR_VAL;
+//returns throttle from 0 to 1000, with deadzone and direction stickiness (only updated if out of dz)
+void getThrottle(uint16_t *throttle, bool *direction);
+bool getManSw();

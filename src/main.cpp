@@ -73,13 +73,22 @@ void loop()
     }
     else
     {
-        uint16_t thr_val;
-        ATOMIC_BLOCK(ATOMIC_RESTORESTATE){
-            thr_val = v_THR_VAL;
-        }
-        Serial.print(thr_val);
+        uint16_t thr_req;
+        bool thr_direction;
+        getThrottle(&thr_req,&thr_direction);
+        Serial.print(thr_req);
         Serial.print(",");
-        run_control(commutation_period, RPM_2_RAW(1000), &throttle, &is_fwd);
+        Serial.print(thr_direction);
+        Serial.print(",");
+        if(getManSw())
+        {
+            throttle = thr_req;
+            is_fwd = thr_direction;
+        }
+        else
+        {
+            run_control(commutation_period, RPM_2_RAW(thr_req)<<4, thr_direction, &throttle, &is_fwd);
+        }
     }
     crc_ok = doDshotTransaction(throttle, is_fwd, &commutation_period); /* will not write to commutation_period if crc is faulty */
     last_micros = current_micros;

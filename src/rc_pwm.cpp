@@ -9,14 +9,21 @@
 #define portPinThrottle PD2 // INT2
 #define pinManual 1         // TX on arduino , mapped to 'gear' on receiver
 #define portPinManual PD3   // INT3
-#define averagingLoopsLog2 1 //averages 2^(val)
+#define averagingLoopsLog2 2 //averages 2^(val)
 
 #define RC_TIMEOUT_LOOPS 250 // 500hz loop rate, 50hz rc rate, allow 1/2 second
+
+#define DZ_HALFUS 20 //this much either side of midpoint
 
 static volatile uint16_t v_THR_START; // treats 0 as cleared state so technically loses 1/65535 rc signals
 static volatile uint16_t v_THR_ACCUM;
 static volatile uint8_t v_THR_ACCUM_CNT;
-volatile uint16_t v_THR_VAL;
+static volatile uint16_t v_THR_VAL; /* LSB 0.5us */
+
+static volatile uint16_t v_MAN_START; // treats 0 as cleared state so technically loses 1/65535 rc signals
+static volatile uint16_t v_MAN_ACCUM;
+static volatile uint8_t v_MAN_ACCUM_CNT;
+static volatile uint16_t v_MAN_VAL; /* LSB 0.5us */
 
 void rcPwmSetup()
 {
@@ -36,7 +43,7 @@ void rcPwmSetup()
         EIFR = _BV(INTF3) | _BV(INTF2);
 
         // re-enable interrupts
-        EIMSK = /*_BV(INT3) | */ _BV(INT2);
+        EIMSK = _BV(INT3) | _BV(INT2);
 
         TCCR3B = 0;
         TCCR3A = 0;
@@ -51,12 +58,17 @@ void disableRcPwm()
 {
 }
 
-// called at end of dshot critical section (inside it), throw away any pin changes that happened during the critical section
+// called at end of dshot critical section (inside it), throw away any pin changes that happened during the critical section (prioritize maintaining main pid loop consistency)
 void reEnableRcPwm()
 {
     if (EIFR & _BV(INTF2)) //restart timing routine if pin change arrive at some point during the dshot critical section
     {
         v_THR_START = 0;
+    }
+
+    if (EIFR & _BV(INTF3)) //restart timing routine if pin change arrive at some point during the dshot critical section
+    {
+        v_MAN_START = 0;
     }
 
     // clear ifr, if the interrupt happens betwen the check and here it doesn't matter because if there is a missed rising edge, the time delta from the last rising edge is so big it will be filtered out, missed falling edge obviously doesn't matter
@@ -85,11 +97,43 @@ ISR(INT2_vect)
 
         // use accumulator to average over samples
         v_THR_ACCUM += timer_delta;
-        if ((v_THR_ACCUM_CNT++) == 1<<averagingLoopsLog2)
+        if ((++v_THR_ACCUM_CNT) == 1<<averagingLoopsLog2)
         {
             v_THR_ACCUM_CNT = 0;
             v_THR_VAL = v_THR_ACCUM >> averagingLoopsLog2;
             v_THR_ACCUM = 0;
+        }
+    }
+    CLR_BIT(PORTD, portPinPwmIsr);
+}
+
+ISR(INT3_vect)
+{
+    uint16_t cnt = TCNT3;
+    SET_BIT(PORTD, portPinPwmIsr);
+    if (PIND & _BV(portPinManual)) // rising edge
+    {
+        v_MAN_START = cnt;
+    }
+    else
+    {
+
+        uint16_t timer_delta = (cnt - v_THR_START);
+        if ((v_MAN_START == 0) || (timer_delta > (4200)) || (timer_delta < (1800))) //only allow between 900us and 2100us
+        {
+            v_MAN_START = 0;
+            CLR_BIT(PORTD, portPinPwmIsr);
+            return; // discard invalid value
+        }
+        v_MAN_START = 0;
+
+        // use accumulator to average over samples
+        v_MAN_ACCUM += timer_delta;
+        if ((++v_MAN_ACCUM_CNT) == 1<<averagingLoopsLog2)
+        {
+            v_MAN_ACCUM_CNT = 0;
+            v_MAN_VAL = v_MAN_ACCUM >> averagingLoopsLog2;
+            v_MAN_ACCUM = 0;
         }
     }
     CLR_BIT(PORTD, portPinPwmIsr);
@@ -120,10 +164,61 @@ bool checkIsMissing(uint16_t v_val, uint16_t v_accum, uint16_t *ptr_last_accum, 
     return true;
 }
 
-bool checkRcMissing()
+bool checkRcMissing() //not checking dir sw cuz it will be a pretty fixed value
 {
     static uint16_t last_throttle_accum;
     static uint8_t unchanging_throttle_loops;
 
     return checkIsMissing(v_THR_VAL, v_THR_ACCUM, &last_throttle_accum, &unchanging_throttle_loops);
+}
+
+static void getAxis(volatile uint16_t * v_AXIS_VAL, bool *last_direction, uint16_t *magnitude, bool *new_direction)
+{
+    uint16_t thr_val;
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE){
+        thr_val = *v_AXIS_VAL;
+    }
+    if(thr_val > 4000+DZ_HALFUS)
+    {
+        *magnitude = 1000;
+        *new_direction = 1;
+    }
+    else if(thr_val < 2000-DZ_HALFUS)
+    {
+        *magnitude = 1000;
+        *new_direction = 0;
+    }
+    else if(thr_val > (3000+DZ_HALFUS))
+    {
+        *magnitude = thr_val - (3000+DZ_HALFUS);
+        *new_direction = 1;
+    }
+    else if(thr_val < (3000-DZ_HALFUS))
+    {
+        *magnitude = (3000-DZ_HALFUS) - thr_val;
+        *new_direction = 0;
+    }
+    else
+    {
+        *magnitude = 0;
+        *new_direction = *last_direction;
+    }
+    *last_direction = *new_direction;
+
+}
+
+void getThrottle(uint16_t *throttle, bool *direction)
+{
+    static bool last_direction;
+    getAxis(&v_THR_VAL,&last_direction,throttle, direction);
+}
+
+bool getManSw()//why is this bad
+{
+    static bool last_direction;
+    uint16_t man_val;
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE){
+        man_val = v_MAN_VAL;
+    }
+    return man_val>3000;
 }
