@@ -1,7 +1,7 @@
 #include "voltage.hpp"
 #include <util/atomic.h>
 
-#define VOLTAGE_PIN A0
+#define VOLTAGE_PIN A0 //2.2k low resistor 20k high resistor, 24V=950
 
 #define averagingLoopsLog2 1
 

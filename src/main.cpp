@@ -95,7 +95,8 @@ void loop()
         getThrottle(&thr_req,&thr_direction);
         getManSw(&man_magnitude, &man_direction);
         voltage = readVoltage();
-        
+        CLR_BIT(PORTC, portPinMainLoop);
+
         if(man_direction)
         {
             throttle = thr_req;
@@ -107,6 +108,7 @@ void loop()
         }
     }
     crc_ok = doDshotTransaction(throttle, is_fwd, &commutation_period); /* will not write to commutation_period if crc is faulty */
+    SET_BIT(PORTC, portPinMainLoop);
 
     //don't want to change performance with/without print by doing this before the dshot transaction
     Serial.print(thr_req);
