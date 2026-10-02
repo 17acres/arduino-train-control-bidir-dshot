@@ -5,13 +5,12 @@ uint16_t filter_rpm(uint16_t rpm);
 
 #define Vff
 
-void run_control(uint16_t commutation_period, uint16_t speed_tgt, bool dir_tgt, uint16_t *throttle_ptr, bool *motor_dir)
+void run_control(uint16_t filtered_rpm, uint16_t speed_tgt, bool dir_tgt, uint16_t *throttle_ptr, bool *motor_dir)
 {
     static uint16_t last_throttle;
     static bool current_dir;
     uint16_t throttle;
-    uint16_t unfilt_rpm = RPM_2_RAW(8571428) / commutation_period; // 60,000,000/(14/2) max rpm is about 10000 unladen
-    uint16_t filtered_rpm = filter_rpm(unfilt_rpm);
+
 
     if (filtered_rpm < RPM_2_RAW(200)) //stops reporting at low numbers
     {
@@ -39,19 +38,7 @@ void run_control(uint16_t commutation_period, uint16_t speed_tgt, bool dir_tgt, 
         throttle = (speed_tgt - filtered_rpm) >> 4; // TODO velocity feed forward
     }
 
-    Serial.print(RAW_2_RPM(unfilt_rpm));
-    Serial.print(",");
-    Serial.print(RAW_2_RPM(filtered_rpm));
-    Serial.print(",");
-    Serial.println(throttle);
-
     last_throttle = throttle;
     *throttle_ptr = throttle;
 }
 
-uint16_t filter_rpm(uint16_t rpm)
-{
-    static uint16_t filtered_rpm = 0;
-    filtered_rpm += ((int16_t)((int32_t)rpm - filtered_rpm)) >> 4;
-    return filtered_rpm;
-}
