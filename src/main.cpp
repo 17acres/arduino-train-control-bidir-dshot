@@ -3,6 +3,7 @@
 #include "common.hpp"
 #include "control.hpp"
 #include "rc_pwm.hpp"
+#include "voltage.hpp"
 #include <util/atomic.h>
 
 
@@ -18,6 +19,7 @@ void setup()
     // while(!Serial); actually waits for port to be open on the host!
     dshotSetup();
     rcPwmSetup();
+    initVoltage();
     pinMode(pinMainLoop, OUTPUT);
 }
 
@@ -41,6 +43,7 @@ void loop()
     bool man_direction = 0;
     uint16_t unfilt_rpm = 0;
     uint16_t filtered_rpm = 0;
+    uint16_t voltage = 0;
 
     uint16_t throttle = 0;
     bool is_fwd = false;
@@ -91,6 +94,7 @@ void loop()
 
         getThrottle(&thr_req,&thr_direction);
         getManSw(&man_magnitude, &man_direction);
+        voltage = readVoltage();
         
         if(man_direction)
         {
@@ -113,6 +117,8 @@ void loop()
     // Serial.print(",");
     // Serial.print(man_direction);
     //Serial.print(",");
+    Serial.print(voltage);
+    Serial.print(",");
     Serial.print(RAW_2_RPM(unfilt_rpm));
     Serial.print(",");
     Serial.print(RAW_2_RPM(filtered_rpm));
