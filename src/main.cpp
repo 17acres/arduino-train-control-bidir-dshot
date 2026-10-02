@@ -75,15 +75,23 @@ void loop()
     {
         uint16_t thr_req;
         bool thr_direction;
+        uint16_t man_magnitude;
+        bool man_direction;
         getThrottle(&thr_req,&thr_direction);
+        getManSw(&man_magnitude, &man_direction);
         Serial.print(thr_req);
         Serial.print(",");
         Serial.print(thr_direction);
         Serial.print(",");
-        if(getManSw())
+        Serial.print(man_magnitude);
+        Serial.print(",");
+        Serial.print(man_direction);
+        Serial.print(",");
+        if(man_direction)
         {
             throttle = thr_req;
             is_fwd = thr_direction;
+            Serial.println();
         }
         else
         {

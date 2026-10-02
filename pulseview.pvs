@@ -1,5 +1,5 @@
 [General]
-decode_signals=5
+decode_signals=6
 meta_objs=1
 views=1
 
@@ -56,8 +56,8 @@ name=gear
 color=4281623972
 conv_options=0
 conversion_type=0
-enabled=false
-name=D6
+enabled=true
+name=pwmisr
 
 [D7]
 color=4285878395
@@ -178,6 +178,25 @@ decoders=1
 enabled=true
 name=gear
 
+[decode_signal5]
+channel0\assigned_signal_name=pwmisr
+channel0\initial_pin_state=2
+channel0\name=Data
+channels=1
+color=4281500330
+conv_options=0
+conversion_type=0
+decoder0\ann_class0\visible=true
+decoder0\ann_class1\visible=true
+decoder0\id=pwm
+decoder0\options=0
+decoder0\row0\visible=true
+decoder0\row1\visible=true
+decoder0\visible=true
+decoders=1
+enabled=true
+name=PWM
+
 [meta_obj0]
 assoc_view=0
 end_time=22 serialization::archive 19 0 0 0 0 1040849 99999999 99349742 37447704 58142738 0 -8 0 0 6
@@ -199,9 +218,9 @@ D4\trace_height=32
 D5\trace_height=32
 D6\trace_height=32
 D7\trace_height=32
-offset=22 serialization::archive 19 0 0 0 0 0 0 0 0 0 0 0 0 0 6
-scale=3.517163759144626e-05
+offset=22 serialization::archive 19 0 0 0 0 551763 90332640 33348231 72007819 74707640 0 -8 1 0 6
+scale=1.3156185031185031e-05
 segment_display_mode=3
-splitter_state=@ByteArray(\0\0\0\xff\0\0\0\x1\0\0\0\x2\0\0\0|\0\0\x6\xff\x1\0\0\0\x1\x1\0\0\0\x1\0)
-v_offset=-25
+splitter_state=@ByteArray(\0\0\0\xff\0\0\0\x1\0\0\0\x2\0\0\0|\0\0\x5\xb1\x1\0\0\0\x1\x1\0\0\0\x1\0)
+v_offset=0
 zero_offset=22 serialization::archive 19 0 0 0 0 0 0 0 0 0 0 0 0 0 6
