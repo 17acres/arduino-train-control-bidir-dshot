@@ -6,3 +6,4 @@
 .vscode/ipch
 *.ii
 *.s
+data/auto*.csv

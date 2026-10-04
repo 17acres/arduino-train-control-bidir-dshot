@@ -9,21 +9,64 @@
 #define portPinThrottle PD2  // INT2
 #define pinManual 1          // TX on arduino , mapped to 'gear' on receiver
 #define portPinManual PD3    // INT3
-#define averagingLoopsLog2 2 // averages 2^(val)
 
 #define RC_TIMEOUT_LOOPS 250 // 500hz loop rate, 50hz rc rate, allow 1/2 second
 
 #define DZ_HALFUS 30 // this much either side of midpoint
 
 static volatile uint16_t v_THR_START; // treats 0 as cleared state so technically loses 1/65535 rc signals
-static volatile uint16_t v_THR_ACCUM;
-static volatile uint8_t v_THR_ACCUM_CNT;
+static volatile uint16_t v_THR_SAMPLES[3];
+static volatile uint8_t v_THR_SAMPLE_COUNT;
+static volatile uint16_t v_THR_SAMPLE_SEQ;
 static volatile uint16_t v_THR_VAL; /* LSB 0.5us */
 
 static volatile uint16_t v_MAN_START; // treats 0 as cleared state so technically loses 1/65535 rc signals
-static volatile uint16_t v_MAN_ACCUM;
-static volatile uint8_t v_MAN_ACCUM_CNT;
+static volatile uint16_t v_MAN_SAMPLES[3];
+static volatile uint8_t v_MAN_SAMPLE_COUNT;
 static volatile uint16_t v_MAN_VAL; /* LSB 0.5us */
+
+static inline uint16_t medianOfThree(uint16_t first, uint16_t second, uint16_t third)
+{
+    uint16_t swap;
+    if (first > second)
+    {
+        swap = first;
+        first = second;
+        second = swap;
+    }
+    if (second > third)
+    {
+        swap = second;
+        second = third;
+        third = swap;
+    }
+    if (first > second)
+    {
+        second = first;
+    }
+    return second;
+}
+
+static inline uint16_t updateMedian(volatile uint16_t *samples, volatile uint8_t *sample_count, uint16_t sample)
+{
+    if (*sample_count < 3)
+    {
+        samples[*sample_count] = sample;
+        ++*sample_count;
+        if (*sample_count < 3)
+        {
+            return sample;
+        }
+    }
+    else
+    {
+        samples[0] = samples[1];
+        samples[1] = samples[2];
+        samples[2] = sample;
+    }
+
+    return medianOfThree(samples[0], samples[1], samples[2]);
+}
 
 void rcPwmSetup()
 {
@@ -95,14 +138,8 @@ ISR(INT2_vect)
         }
         v_THR_START = 0;
 
-        // use accumulator to average over samples
-        v_THR_ACCUM += timer_delta;
-        if ((++v_THR_ACCUM_CNT) == 1 << averagingLoopsLog2)
-        {
-            v_THR_ACCUM_CNT = 0;
-            v_THR_VAL = v_THR_ACCUM >> averagingLoopsLog2;
-            v_THR_ACCUM = 0;
-        }
+        v_THR_VAL = updateMedian(v_THR_SAMPLES, &v_THR_SAMPLE_COUNT, timer_delta);
+        ++v_THR_SAMPLE_SEQ;
     }
     CLR_BIT(PORTD, portPinPwmIsr);
 }
@@ -127,19 +164,12 @@ ISR(INT3_vect)
         }
         v_MAN_START = 0;
 
-        // use accumulator to average over samples
-        v_MAN_ACCUM += timer_delta;
-        if ((++v_MAN_ACCUM_CNT) == 1 << averagingLoopsLog2)
-        {
-            v_MAN_ACCUM_CNT = 0;
-            v_MAN_VAL = v_MAN_ACCUM >> averagingLoopsLog2;
-            v_MAN_ACCUM = 0;
-        }
+        v_MAN_VAL = updateMedian(v_MAN_SAMPLES, &v_MAN_SAMPLE_COUNT, timer_delta);
     }
     CLR_BIT(PORTD, portPinPwmIsr);
 }
 
-bool checkIsMissing(uint16_t v_val, uint16_t v_accum, uint16_t *ptr_last_accum, uint8_t *ptr_unchanging_loops)
+bool checkIsMissing(uint16_t v_val, uint16_t v_update_count, uint16_t *ptr_last_update_count, uint8_t *ptr_unchanging_loops)
 {
     // corruption from nonatomic read during write also counts as a non-missing signal... so don't care
 
@@ -148,10 +178,10 @@ bool checkIsMissing(uint16_t v_val, uint16_t v_accum, uint16_t *ptr_last_accum, 
         return true;
     }
 
-    if (v_accum != *ptr_last_accum)
+    if (v_update_count != *ptr_last_update_count)
     {
         *ptr_unchanging_loops = 0;
-        *ptr_last_accum = v_accum;
+        *ptr_last_update_count = v_update_count;
         return false;
     }
 
@@ -166,10 +196,10 @@ bool checkIsMissing(uint16_t v_val, uint16_t v_accum, uint16_t *ptr_last_accum, 
 
 bool checkRcMissing() // not checking dir sw cuz it will be a pretty fixed value
 {
-    static uint16_t last_throttle_accum;
+    static uint16_t last_throttle_update_count;
     static uint8_t unchanging_throttle_loops;
 
-    return checkIsMissing(v_THR_VAL, v_THR_ACCUM, &last_throttle_accum, &unchanging_throttle_loops);
+    return checkIsMissing(v_THR_VAL, v_THR_SAMPLE_SEQ, &last_throttle_update_count, &unchanging_throttle_loops);
 }
 
 static void getAxis(volatile uint16_t *p_V_AXIS_VAL, bool *p_last_direction, uint16_t *p_magnitude, bool *p_new_direction)

@@ -18,7 +18,7 @@
 #define INIT_LOOPS 2500 // 5 second of command 0
 #define pinMainLoop 5
 #define portPinMainLoop PC6 // green led
-#define main_loop_micros 2000
+#define main_loop_halfmicros 4000
 
 void setup()
 {
@@ -28,6 +28,9 @@ void setup()
     rcPwmSetup();
     initVoltage();
     pinMode(pinMainLoop, OUTPUT);
+
+    TIMSK0 = 0; //disable timer0
+    //Still get some lag spikes affecting RC value when plugged in with USB because of random USB stuff (even when not doing serial)
 }
 
 uint16_t filter_rpm(uint16_t rpm)
@@ -56,7 +59,8 @@ void loop()
     static uint16_t init_loop_ctr;
     static uint16_t commutation_period = INT16_MAX;
     static bool crc_ok = false;
-    static uint32_t last_micros = 0;
+    static uint16_t last_halfmicros = 0;
+    static uint16_t halfmicros_overflows = 0;
     uint16_t thr_req = 0;
     bool thr_direction = 0;
     uint16_t man_magnitude = 0;
@@ -67,15 +71,22 @@ void loop()
 
     uint16_t throttle = 0;
     bool is_fwd = false;
-
-    uint32_t current_micros = micros();
-    // spin until main_loop_micros has elapsed and allowed to run
-    if (((current_micros - last_micros) < main_loop_micros))
+    uint16_t current_halfmicros;
+    ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+    {
+        current_halfmicros = TCNT3;
+    }
+    // spin until main_loop_halfmicros has elapsed and allowed to run
+    if (((current_halfmicros - last_halfmicros) < main_loop_halfmicros))
     {
         return;
     }
+    if(current_halfmicros < last_halfmicros)
+    {
+        halfmicros_overflows+=1;
+    }
 
-    SET_BIT(PORTC, portPinMainLoop);
+    //SET_BIT(PORTC, portPinMainLoop);
 
     if (crc_ok)
     {
@@ -128,10 +139,13 @@ void loop()
         throttle = voltage_comp(throttle,voltage);
     }
     crc_ok = doDshotTransaction(throttle, is_fwd, &commutation_period); /* will not write to commutation_period if crc is faulty */
-    SET_BIT(PORTC, portPinMainLoop);
-#define Timestamp current_micros
+    static uint16_t last_thr;
+    if((int16_t)last_thr-(int16_t)thr_req>5)
+        SET_BIT(PORTC, portPinMainLoop);
+    last_thr=thr_req;
+#define Timestamp ((((uint32_t)halfmicros_overflows)<<16)+current_halfmicros)
     uint8_t dataPacket[] = {
-        DUMP_U32(Timestamp, 0.000001), // name for advantagescope
+        DUMP_U32(Timestamp, 0.0000005), // name for advantagescope
         DUMP_U16(thr_req, 1),
         DUMP_U8(thr_direction, 1),
         DUMP_U8(man_direction, 1),
@@ -143,6 +157,6 @@ void loop()
         0, 0, 0, 0 ,0};
     Serial.write(dataPacket, sizeof(dataPacket));
     // don't want to change performance with/without print by doing this before the dshot transaction
-    last_micros = current_micros;
+    last_halfmicros = current_halfmicros;
     CLR_BIT(PORTC, portPinMainLoop);
 }

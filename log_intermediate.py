@@ -31,7 +31,7 @@ def main():
 
     
     ser=Serial(port='/dev/ttyACM0',timeout=1)
-    wh=open("data/"+datetime.now().strftime("%Y-%M-%d_%H-%M-%S")+".csv","w")
+    wh=open("data/auto"+datetime.now().strftime("%Y-%M-%d_%H-%M-%S")+".csv","w")
     header = ",".join([name for macro,name, res in dataFormat])
     print(header,file=wh)
     print(header)
@@ -39,7 +39,9 @@ def main():
     while(ser.is_open):
         line = ser.read_until(b"\0\0\0\0\0");
         splitted = line.split(b',')[:-1]
-        if len(splitted) !=len(dataFormat):
+        if len(splitted) !=len(dataFormat) or max([len(chunk) for chunk in splitted])>4: #more than 4 bytes per
+            if max([len(chunk) for chunk in splitted])>4:
+                print(splitted[0].split(b'\r')[0].decode())
             continue
         printvalues = [str(int.from_bytes(bytes,signed=[dataFormat[index][0]])*dataFormat[index][2]) for index, bytes in enumerate(splitted)]
         print(",".join(printvalues),file=wh)
