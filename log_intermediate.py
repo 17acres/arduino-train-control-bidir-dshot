@@ -30,7 +30,7 @@ def main():
                 dataFormat.append((signed,name,res))
 
     
-    ser=Serial(port='/dev/ttyACM0',timeout=1)
+    ser=Serial(port='/dev/ttyACM1',timeout=1)
     wh=open("data/auto"+datetime.now().strftime("%Y-%M-%d_%H-%M-%S")+".csv","w")
     header = ",".join([name for macro,name, res in dataFormat])
     print(header,file=wh)

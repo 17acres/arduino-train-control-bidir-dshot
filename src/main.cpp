@@ -61,6 +61,7 @@ void loop()
     static bool crc_ok = false;
     static uint16_t last_halfmicros = 0;
     static uint16_t halfmicros_overflows = 0;
+    static uint16_t filt_rpm_rq = 0;
     uint16_t thr_req = 0;
     bool thr_direction = 0;
     uint16_t man_magnitude = 0;
@@ -123,18 +124,19 @@ void loop()
         filtered_rpm = filter_rpm(unfilt_rpm);
 
         getThrottle(&thr_req, &thr_direction);
+        filt_rpm_rq += (int16_t)((int32_t)RPM_2_RAW(thr_req<<4) - filt_rpm_rq) >> 4;
         getManSw(&man_magnitude, &man_direction);
         voltage = readVoltage();
         CLR_BIT(PORTC, portPinMainLoop);
 
         if (man_direction)
         {
-            throttle = thr_req;
+            throttle = RAW_2_RPM(filt_rpm_rq>>4);
             is_fwd = thr_direction;
         }
         else
         {
-            run_control(filtered_rpm, RPM_2_RAW(thr_req << 4), thr_direction, &throttle, &is_fwd);
+            run_control(filtered_rpm, filt_rpm_rq, thr_direction, &throttle, &is_fwd);
         }
         throttle = voltage_comp(throttle,voltage);
     }
@@ -147,12 +149,12 @@ void loop()
     uint8_t dataPacket[] = {
         DUMP_U32(Timestamp, 0.0000005), // name for advantagescope
         DUMP_U16(thr_req, 1),
+        DUMP_U16(filt_rpm_rq, 0.25), //RAW_2_RPM is >>2
         DUMP_U8(thr_direction, 1),
         DUMP_U8(man_direction, 1),
         DUMP_U16(voltage, 1),
-        DUMP_U16(RAW_2_RPM(unfilt_rpm), 1),
-        DUMP_U16(RAW_2_RPM(filtered_rpm), 1),
-        DUMP_U16(RAW_2_RPM(thr_req << 4), 1), // rpm target
+        DUMP_U16(unfilt_rpm, 0.25),
+        DUMP_U16(filtered_rpm, 0.25),
         DUMP_U16(throttle, 1),
         0, 0, 0, 0 ,0};
     Serial.write(dataPacket, sizeof(dataPacket));
