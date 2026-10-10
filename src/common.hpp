@@ -6,3 +6,5 @@
 #define RPM_SHIFT 2
 #define RAW_2_RPM(raw) (raw >> 2)
 #define RPM_2_RAW(rpm) (rpm << 2)
+#define FLOAT_2_INT16(val,shift) ((int16_t)((val)*(1<<(shift))))
+#define main_loop_halfmicros 4000

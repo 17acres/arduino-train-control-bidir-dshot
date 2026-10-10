@@ -6,19 +6,18 @@
 #include "voltage.hpp"
 #include <util/atomic.h>
 
-#define FOURTH_BYTE(var) ((uint8_t)((var >> 24) &0xFF))
+#define FOURTH_BYTE(var) ((uint8_t)((var >> 24) & 0xFF))
 #define THIRD_BYTE(var) ((uint8_t)((var >> 16) & 0xFF))
 #define SECOND_BYTE(var) ((uint8_t)((var >> 8) & 0xFF))
 #define LOWER_BYTE(var) ((uint8_t)(var & 0xFF))
 #define DUMP_U16(var, res) SECOND_BYTE(var), LOWER_BYTE(var), ','
-#define DUMP_U32(var, res) FOURTH_BYTE(var), THIRD_BYTE(var),SECOND_BYTE(var), LOWER_BYTE(var), ','
+#define DUMP_U32(var, res) FOURTH_BYTE(var), THIRD_BYTE(var), SECOND_BYTE(var), LOWER_BYTE(var), ','
 #define DUMP_U8(var, res) (var), ','
 
 #define ESC_TIMEOUT_LOOPS 100
 #define INIT_LOOPS 2500 // 5 second of command 0
 #define pinMainLoop 5
 #define portPinMainLoop PC6 // green led
-#define main_loop_halfmicros 4000
 
 void setup()
 {
@@ -29,8 +28,8 @@ void setup()
     initVoltage();
     pinMode(pinMainLoop, OUTPUT);
 
-    TIMSK0 = 0; //disable timer0
-    //Still get some lag spikes affecting RC value when plugged in with USB because of random USB stuff (even when not doing serial)
+    TIMSK0 = 0; // disable timer0
+    // Still get some lag spikes affecting RC value when plugged in with USB because of random USB stuff (even when not doing serial)
 }
 
 uint16_t filter_rpm(uint16_t rpm)
@@ -40,15 +39,15 @@ uint16_t filter_rpm(uint16_t rpm)
     return filtered_rpm;
 }
 
-//throttle is using 10 bits, so is voltage
+// throttle is using 10 bits, so is voltage
 uint16_t voltage_comp(uint16_t throttle, uint16_t voltage)
 {
-    if(voltage<400) //only vcomp over like 10V
+    if (voltage < 400) // only vcomp over like 10V
     {
         voltage = 400;
-    }    
-    uint32_t tmp = (((uint32_t)throttle) << 10) / (uint32_t)voltage; //this cost 30us more than shifting voltage right by 4
-    if (tmp>1000)
+    }
+    uint32_t tmp = (((uint32_t)throttle) << 10) / (uint32_t)voltage; // this cost 30us more than shifting voltage right by 4
+    if (tmp > 1000)
         return 1000;
     return tmp;
 }
@@ -69,6 +68,7 @@ void loop()
     uint16_t unfilt_rpm = 0;
     uint16_t filtered_rpm = 0;
     uint16_t voltage = 0;
+    ControlLogStruct logStruct = {0, 0, 0, 0, 0, 0};
 
     uint16_t throttle = 0;
     bool is_fwd = false;
@@ -82,12 +82,12 @@ void loop()
     {
         return;
     }
-    if(current_halfmicros < last_halfmicros)
+    if (current_halfmicros < last_halfmicros)
     {
-        halfmicros_overflows+=1;
+        halfmicros_overflows += 1;
     }
 
-    //SET_BIT(PORTC, portPinMainLoop);
+    SET_BIT(PORTC, portPinMainLoop);
 
     if (crc_ok)
     {
@@ -124,41 +124,46 @@ void loop()
         filtered_rpm = filter_rpm(unfilt_rpm);
 
         getThrottle(&thr_req, &thr_direction);
-        filt_rpm_rq += (int16_t)((int32_t)RPM_2_RAW(thr_req<<4) - filt_rpm_rq) >> 4;
+        filt_rpm_rq += (int16_t)((int32_t)RPM_2_RAW(thr_req << 4) - filt_rpm_rq) >> 4;
         getManSw(&man_magnitude, &man_direction);
         voltage = readVoltage();
         CLR_BIT(PORTC, portPinMainLoop);
 
         if (man_direction)
         {
-            throttle = RAW_2_RPM(filt_rpm_rq>>4);
+            throttle = RAW_2_RPM(filt_rpm_rq >> 4);
             is_fwd = thr_direction;
         }
         else
         {
-            run_control(filtered_rpm, filt_rpm_rq, thr_direction, &throttle, &is_fwd);
+            run_control(filtered_rpm, filt_rpm_rq, thr_direction, &throttle, &is_fwd, &logStruct);
         }
-        throttle = voltage_comp(throttle,voltage);
+        throttle = voltage_comp(throttle, voltage);
     }
     crc_ok = doDshotTransaction(throttle, is_fwd, &commutation_period); /* will not write to commutation_period if crc is faulty */
-    static uint16_t last_thr;
-    if((int16_t)last_thr-(int16_t)thr_req>5)
-        SET_BIT(PORTC, portPinMainLoop);
-    last_thr=thr_req;
-#define Timestamp ((((uint32_t)halfmicros_overflows)<<16)+current_halfmicros)
+
+
+    #define Timestamp ((((uint32_t)halfmicros_overflows) << 16) + current_halfmicros)
     uint8_t dataPacket[] = {
         DUMP_U32(Timestamp, 0.0000005), // name for advantagescope
         DUMP_U16(thr_req, 1),
-        DUMP_U16(filt_rpm_rq, 0.25), //RAW_2_RPM is >>2
+        DUMP_U16(filt_rpm_rq, 0.25), // RAW_2_RPM is >>2
         DUMP_U8(thr_direction, 1),
         DUMP_U8(man_direction, 1),
         DUMP_U16(voltage, 1),
         DUMP_U16(unfilt_rpm, 0.25),
         DUMP_U16(filtered_rpm, 0.25),
         DUMP_U16(throttle, 1),
-        0, 0, 0, 0 ,0};
+        DUMP_U16(logStruct.error, 0.25),
+        DUMP_U16(logStruct.iacc, 1),
+        DUMP_U16(logStruct.vff_term, 0.25),
+        DUMP_U16(logStruct.p_term, 0.25),
+        DUMP_U16(logStruct.i_term, 0.25),
+        DUMP_U16(logStruct.pid_rq, 0.002),
+        0, 0, 0, 0, 0};
     Serial.write(dataPacket, sizeof(dataPacket));
     // don't want to change performance with/without print by doing this before the dshot transaction
+
     last_halfmicros = current_halfmicros;
     CLR_BIT(PORTC, portPinMainLoop);
 }
