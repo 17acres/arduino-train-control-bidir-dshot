@@ -12,6 +12,7 @@
 #define LOWER_BYTE(var) ((uint8_t)(var & 0xFF))
 #define DUMP_U16(var, res) SECOND_BYTE(var), LOWER_BYTE(var), ','
 #define DUMP_U32(var, res) FOURTH_BYTE(var), THIRD_BYTE(var), SECOND_BYTE(var), LOWER_BYTE(var), ','
+#define DUMP_S32(var, res) DUMP_U32(var,res)
 #define DUMP_U8(var, res) (var), ','
 
 #define ESC_TIMEOUT_LOOPS 100
@@ -61,6 +62,7 @@ void loop()
     static uint16_t last_halfmicros = 0;
     static uint16_t halfmicros_overflows = 0;
     static uint16_t filt_rpm_rq = 0;
+    uint16_t filt_rpm_rq_4control = 0;
     uint16_t thr_req = 0;
     bool thr_direction = 0;
     uint16_t man_magnitude = 0;
@@ -122,8 +124,13 @@ void loop()
     {
         unfilt_rpm = RPM_2_RAW(8571428) / commutation_period; // 60,000,000/(14/2) max rpm is about 10000 unladen
         filtered_rpm = filter_rpm(unfilt_rpm);
+        if(filtered_rpm < RPM_2_RAW(200))
+        {
+            filtered_rpm = 0;
+        }
 
         getThrottle(&thr_req, &thr_direction);
+        thr_direction = !thr_direction; //invert direction
         filt_rpm_rq += (int16_t)((int32_t)RPM_2_RAW(thr_req << 4) - filt_rpm_rq) >> 4;
         getManSw(&man_magnitude, &man_direction);
         voltage = readVoltage();
@@ -136,30 +143,38 @@ void loop()
         }
         else
         {
+            if(filt_rpm_rq > RPM_2_RAW(400))  //deadzone because the rpm feedback has a deadzone
+            {
+                filt_rpm_rq_4control = filt_rpm_rq;
+            }
+            else
+            {
+                filt_rpm_rq_4control = 0;
+            }
             run_control(filtered_rpm, filt_rpm_rq, thr_direction, &throttle, &is_fwd, &logStruct);
         }
         throttle = voltage_comp(throttle, voltage);
     }
     crc_ok = doDshotTransaction(throttle, is_fwd, &commutation_period); /* will not write to commutation_period if crc is faulty */
 
-
+    SET_BIT(PORTC, portPinMainLoop);
     #define Timestamp ((((uint32_t)halfmicros_overflows) << 16) + current_halfmicros)
     uint8_t dataPacket[] = {
         DUMP_U32(Timestamp, 0.0000005), // name for advantagescope
         DUMP_U16(thr_req, 1),
-        DUMP_U16(filt_rpm_rq, 0.25), // RAW_2_RPM is >>2
+        DUMP_U16(filt_rpm_rq_4control, 0.25), // RAW_2_RPM is >>2
         DUMP_U8(thr_direction, 1),
         DUMP_U8(man_direction, 1),
         DUMP_U16(voltage, 1),
         DUMP_U16(unfilt_rpm, 0.25),
         DUMP_U16(filtered_rpm, 0.25),
         DUMP_U16(throttle, 1),
-        DUMP_U16(logStruct.error, 0.25),
-        DUMP_U16(logStruct.iacc, 1),
-        DUMP_U16(logStruct.vff_term, 0.25),
-        DUMP_U16(logStruct.p_term, 0.25),
-        DUMP_U16(logStruct.i_term, 0.25),
-        DUMP_U16(logStruct.pid_rq, 0.002),
+        DUMP_S32(logStruct.error, 0.25),
+        DUMP_S32(logStruct.iacc, 0.002),
+        DUMP_S32(logStruct.vff_term, 1),
+        DUMP_S32(logStruct.p_term, 1),
+        DUMP_S32(logStruct.i_term, 1),
+        DUMP_S32(logStruct.pid_rq, 1),
         0, 0, 0, 0, 0};
     Serial.write(dataPacket, sizeof(dataPacket));
     // don't want to change performance with/without print by doing this before the dshot transaction

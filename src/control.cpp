@@ -7,19 +7,19 @@ uint16_t filter_rpm(uint16_t rpm);
 // to maximize resolution, want to shift left as much as possible before converting to int so that coeff * shift is 15 bits or less
 
 #define VFF_COEFF_SHIFT 15 // max of about 16 for p of 1 (16-log2(Vff))
-#define Vff 0.067            // throttle counts per rpm
+#define Vff 0.05            // throttle counts per rpm
 
 #define P_COEFF_SHIFT 15
-#define Kp 0.1 // throttle counts per rpm error
+#define Kp 0.2 // throttle counts per rpm error
 
-#define I_COEFF_SHIFT 10 // max of like 23 for i of 1 (because of extra scaling for loop time)
-#define Ki 0.001           // throttle counts per rpm*second of iacc
+#define I_COEFF_SHIFT 20 // max of like 22 for i of 1 (because of extra scaling for loop time)
+#define Ki 0.4           // throttle counts per rpm*second of iacc
 
 #define Vff_int FLOAT_2_INT16(Vff, VFF_COEFF_SHIFT - RPM_SHIFT)
 #define Kp_int FLOAT_2_INT16(Kp, P_COEFF_SHIFT - RPM_SHIFT)
 #define Ki_int FLOAT_2_INT16(Ki *main_loop_halfmicros / 2000000, I_COEFF_SHIFT)
 
-#define IACC_MAX 20000
+#define IACC_MAX (1l<<17)
 
 void run_control(uint16_t filtered_rpm, uint16_t speed_tgt, bool dir_tgt, uint16_t *throttle_ptr, bool *motor_dir, ControlLogStruct *logStruct)
 {
@@ -27,7 +27,7 @@ void run_control(uint16_t filtered_rpm, uint16_t speed_tgt, bool dir_tgt, uint16
     static int32_t iacc; // LSB of 1 rpm*loop
     uint16_t throttle;
 
-    if (filtered_rpm < RPM_2_RAW(200)) // stops reporting at low numbers
+    if (filtered_rpm == 0) // clipped to 0 at low speeds
     {
         *motor_dir = dir_tgt;
         current_dir = dir_tgt;
@@ -46,7 +46,7 @@ void run_control(uint16_t filtered_rpm, uint16_t speed_tgt, bool dir_tgt, uint16
 
     if (((iacc > -IACC_MAX) && (iacc < IACC_MAX)) || ((iacc > IACC_MAX) && (error < 0)) || ((iacc < -IACC_MAX) && (error > 0)))
     {
-        iacc += error;
+        iacc += RAW_2_RPM(error);//convert lsb
     }
 
     int32_t vff_term = ((int32_t)speed_tgt * Vff_int) >> VFF_COEFF_SHIFT;

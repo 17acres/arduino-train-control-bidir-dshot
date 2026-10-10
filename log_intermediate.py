@@ -1,14 +1,6 @@
 from serial import Serial
 from datetime import datetime
 
-#remember the comma after each value (to help framing)
-functable = {
-    'DUMP_U32': lambda bytes: int.from_bytes(bytes,signed=False),
-    'DUMP_U16': lambda bytes: int.from_bytes(bytes,signed=False),
-    'DUMP_U8': lambda bytes: int.from_bytes(bytes,signed=False)
-}
-
-
 def main():
     dataFormat = []
     with open("src/main.cpp") as mainh:
@@ -30,7 +22,7 @@ def main():
                 dataFormat.append((signed,name,res))
 
     
-    ser=Serial(port='/dev/ttyACM1',timeout=1)
+    ser=Serial(port='/dev/ttyACM0',timeout=1)
     wh=open("data/auto"+datetime.now().strftime("%Y-%M-%d_%H-%M-%S")+".csv","w")
     header = ",".join([name for macro,name, res in dataFormat])
     print(header,file=wh)
@@ -43,7 +35,7 @@ def main():
             if max([len(chunk) for chunk in splitted])>4:
                 print(splitted[0].split(b'\r')[0].decode())
             continue
-        printvalues = [str(int.from_bytes(bytes,signed=[dataFormat[index][0]])*dataFormat[index][2]) for index, bytes in enumerate(splitted)]
+        printvalues = [str(int.from_bytes(bytes,signed=dataFormat[index][0])*dataFormat[index][2]) for index, bytes in enumerate(splitted)]
         print(",".join(printvalues),file=wh)
         print(",".join(printvalues))
 
