@@ -7,8 +7,8 @@
 
 void initVoltage()
 {
-    ADMUX = _BV(REFS1) | _BV(REFS0) | _BV(MUX1) | _BV(MUX0); //2.56V reference, D8 (ADC11)
-    ADCSRB = _BV(MUX5); //free-running mode, mux5 for ADC11
+    ADMUX = _BV(REFS1) | _BV(REFS0) | _BV(MUX1); //2.56V reference, D8 (ADC10)
+    ADCSRB = _BV(MUX5); //free-running mode, mux5 for ADC10
     SET_BIT(DIDR0,ADC7D);//disable digital input on this pin
     ADCSRA = _BV(ADEN) | _BV(ADSC) | _BV(ADATE) | _BV(ADPS2) | _BV(ADPS1) | _BV(ADPS0); //enable adc, start capture, divide clock by 128
 }

@@ -32,8 +32,8 @@
 // DSHOT Output pin
 #define pinDshot 4 // PD4 is timer1 input capture
 #define portPinDshot PD4
-#define pinCriticalSection 6 // PD7 is timer2 ISR-running-indicator
-#define portPinCriticalSection PD7
+#define pinCriticalSection 7 // PE6 is timer2 ISR-running-indicator
+#define portPinCriticalSection PE6
 
 // Timer 1 for input capture of BDSHOT
 // Timer 3 for loop timing
@@ -202,7 +202,7 @@ bool doDshotTransaction(uint16_t throttle, bool is_fwd, uint16_t *p_commutation_
     uint16_t frame = buildFrame(throttle, is_fwd);
 
     // This is a critical section since it is actually doing the communication
-    SET_BIT(PORTD, portPinCriticalSection);
+    SET_BIT(PORTE, portPinCriticalSection);
     ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
     {
         disableRcPwm();
@@ -210,7 +210,7 @@ bool doDshotTransaction(uint16_t throttle, bool is_fwd, uint16_t *p_commutation_
         readTelemetryResponse(state_durations);
         reEnableRcPwm();
     }
-    CLR_BIT(PORTD, portPinCriticalSection);
+    CLR_BIT(PORTE, portPinCriticalSection);
 
     return processTelemetryResponse(state_durations, p_commutation_period);
 }
@@ -222,7 +222,7 @@ void dshotSetup()
 
     // Set the default signal Level
     SET_BIT(PORTD, portPinDshot);
-    CLR_BIT(PORTD, portPinCriticalSection);
+    CLR_BIT(PORTE, portPinCriticalSection);
 }
 
 static uint16_t buildFrame(uint16_t throttle, bool is_fwd)
