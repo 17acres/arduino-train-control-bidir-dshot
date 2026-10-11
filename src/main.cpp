@@ -18,7 +18,9 @@
 #define ESC_TIMEOUT_LOOPS 100
 #define INIT_LOOPS 2500 // 5 second of command 0
 #define pinMainLoop 5
-#define portPinMainLoop PC6 // green led
+#define portPinMainLoop PC6
+
+#define portPinRxLed PB0
 
 void setup()
 {
@@ -28,6 +30,7 @@ void setup()
     rcPwmSetup();
     initVoltage();
     pinMode(pinMainLoop, OUTPUT);
+    pinMode(LED_BUILTIN_RX,OUTPUT);
 
     TIMSK0 = 0; // disable timer0
     // Still get some lag spikes affecting RC value when plugged in with USB because of random USB stuff (even when not doing serial)
@@ -51,6 +54,27 @@ uint16_t voltage_comp(uint16_t throttle, uint16_t voltage)
     if (tmp > 1000)
         return 1000;
     return tmp;
+}
+
+#define HZ_TO_OVERFLOWS(hz) ((uint16_t)((1000/(32.767*2*hz)+1)))
+void run_flash_pattern(uint16_t toggle_overflows,uint16_t overflows)
+{
+    static uint16_t last_change_overflows = 0;
+    static bool state= false;
+    if((overflows-last_change_overflows) > toggle_overflows)
+    {
+        state^=true;
+        last_change_overflows = overflows;
+    }
+
+    if(state) //need to write every loop to win against serial code
+    {
+        SET_BIT(PORTB,portPinRxLed);
+    }
+    else
+    {
+        CLR_BIT(PORTB,portPinRxLed);
+    }
 }
 
 void loop()
@@ -84,7 +108,7 @@ void loop()
     {
         return;
     }
-    if (current_halfmicros < last_halfmicros)
+    if (current_halfmicros < last_halfmicros) //every 32.768ms
     {
         halfmicros_overflows += 1;
     }
@@ -109,16 +133,19 @@ void loop()
     {
         Serial.println("Init Delay");
         throttle = THROTTLE_MOTOR_STOP;
+        CLR_BIT(PORTB,portPinRxLed); //solid on
     }
     else if (esc_missing_ctr >= ESC_TIMEOUT_LOOPS)
     {
         Serial.println("ESC Missing Timeout");
+        run_flash_pattern(1,halfmicros_overflows);
         throttle = THROTTLE_MOTOR_STOP;
     }
     else if (checkRcMissing())
     {
         Serial.println("R/C Signal Missing Timeout");
         throttle = THROTTLE_MOTOR_STOP;
+        run_flash_pattern(HZ_TO_OVERFLOWS(5),halfmicros_overflows);
     }
     else
     {
@@ -140,6 +167,7 @@ void loop()
         {
             throttle = RAW_2_RPM(filt_rpm_rq >> 4);
             is_fwd = thr_direction;
+            run_flash_pattern(HZ_TO_OVERFLOWS(1),halfmicros_overflows);
         }
         else
         {
@@ -152,11 +180,11 @@ void loop()
                 filt_rpm_rq_4control = 0;
             }
             run_control(filtered_rpm, filt_rpm_rq, thr_direction, &throttle, &is_fwd, &logStruct);
+            run_flash_pattern(HZ_TO_OVERFLOWS(0.5),halfmicros_overflows);
         }
         throttle = voltage_comp(throttle, voltage);
     }
     crc_ok = doDshotTransaction(throttle, is_fwd, &commutation_period); /* will not write to commutation_period if crc is faulty */
-
     SET_BIT(PORTC, portPinMainLoop);
     #define Timestamp ((((uint32_t)halfmicros_overflows) << 16) + current_halfmicros)
     uint8_t dataPacket[] = {

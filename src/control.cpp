@@ -44,7 +44,13 @@ void run_control(uint16_t filtered_rpm, uint16_t speed_tgt, bool dir_tgt, uint16
 
     int32_t error = (int32_t)speed_tgt - (int32_t)filtered_rpm; // have headroom of 15 bits until overflow
 
-    if (((iacc > -IACC_MAX) && (iacc < IACC_MAX)) || ((iacc > IACC_MAX) && (error < 0)) || ((iacc < -IACC_MAX) && (error > 0)))
+    if (
+        (
+            ((iacc > -IACC_MAX) && (iacc < IACC_MAX)) 
+            || ((iacc > IACC_MAX) && (error < 0)) 
+            || ((iacc < -IACC_MAX) && (error > 0))
+        )
+    )
     {
         iacc += RAW_2_RPM(error);//convert lsb
     }
@@ -54,7 +60,7 @@ void run_control(uint16_t filtered_rpm, uint16_t speed_tgt, bool dir_tgt, uint16
     int32_t i_term = (iacc * Ki_int) >> I_COEFF_SHIFT;
     int32_t pid_rq = vff_term + p_term + i_term;
 
-    if (pid_rq > 0)
+    if ((pid_rq > 0)&&(speed_tgt!=0))
     {
         if (pid_rq <= 1000)
         {
