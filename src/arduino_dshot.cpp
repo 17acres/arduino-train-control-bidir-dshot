@@ -9,7 +9,7 @@
  * to processing the DShot response and will result in actual 3kHz instead.
  *
  * At this point the serial port will not be able to print anything anymore since
- * interrupts are "queing" up, rendering the main loop basically non-functional.
+ * interrupts are "queueing" up, rendering the main loop basically non-functional.
  *
  * 8kHz can ONLY be achieved when sending (uninverted) Dshot und not processing
  * responses.
@@ -32,11 +32,10 @@
 // DSHOT Output pin
 #define pinDshot 4 // PD4 is timer1 input capture
 #define portPinDshot PD4
-#define pinCriticalSection 7 // PE6 is timer2 ISR-running-indicator
+#define pinCriticalSection 7 // PE6 was the timer2 ISR-running-indicator, now it is just a critical section since the main loop timing isn't that critical, it's needed for PWM measurement
 #define portPinCriticalSection PE6
 
 // Timer 1 for input capture of BDSHOT
-// Timer 3 for loop timing
 // Port D for interface
 
 #define MIN_THR 48u
@@ -146,8 +145,8 @@ static void readTelemetryResponse(uint8_t state_durations[buffSize])
  * Thus we fetch MSB, left shift the result and then right shift the frame.
  *
  * IMPROVEMENT: Since this part is actually time critical, any improvement that can be
- *              made is a good improvment. Thus when the frame is initially generated
- *              it might make sense to arange it in a way that is benefitial for
+ *              made is a good improvement. Thus when the frame is initially generated
+ *              it might make sense to arange it in a way that is beneficial for
  *              transmission.
  */
 static void sendDshot300Frame(uint16_t frame)
@@ -281,7 +280,7 @@ static bool processTelemetryResponse(const uint8_t state_durations[], uint16_t *
         }
     }
 
-    // Decode GCR 21 -> 20 bit (since the 21st bit is definetly a 0)
+    // Decode GCR 21 -> 20 bit (since the 21st bit is definitely a 0)
     dshotResponse ^= (dshotResponse >> 1);
 
     uint16_t mapped = dshot.mapTo16Bit(dshotResponse);

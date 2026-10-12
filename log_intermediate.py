@@ -30,7 +30,8 @@ def main():
 
     while(ser.is_open):
         line = ser.read_until(b"\0\0\0\0\0");
-        splitted = line.split(b',')[:-1]
+        splitted = line.split(b',')[:-1] #This will get very upset if the data contains a byte that happens to contain the byte value of ',', but this will be silently thrown away sometimes
+        # TODO: parse as fixed-length not comma-delimited (although the commas are still fine for framing)
         if len(splitted) !=len(dataFormat) or max([len(chunk) for chunk in splitted])>4: #more than 4 bytes per
             if max([len(chunk) for chunk in splitted])>4:
                 print(splitted[0].split(b'\r')[0].decode())

@@ -114,7 +114,7 @@ void reEnableRcPwm()
         v_MAN_START = 0;
     }
 
-    // clear ifr, if the interrupt happens betwen the check and here it doesn't matter because if there is a missed rising edge, the time delta from the last rising edge is so big it will be filtered out, missed falling edge obviously doesn't matter
+    // clear ifr, if the interrupt happens between the check and here it doesn't matter because if there is a missed rising edge, the time delta from the last rising edge is so big it will be filtered out, missed falling edge obviously doesn't matter
     EIFR = _BV(INTF3) | _BV(INTF2);
 }
 

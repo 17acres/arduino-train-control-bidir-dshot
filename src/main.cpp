@@ -177,6 +177,7 @@ void loop()
             }
             else
             {
+                //TODO: maybe actually transmit Stop not 48 (minimum speed forward?) but that might cause active braking?
                 filt_rpm_rq_4control = 0;
             }
             run_control(filtered_rpm, filt_rpm_rq, thr_direction, &throttle, &is_fwd, &logStruct);
